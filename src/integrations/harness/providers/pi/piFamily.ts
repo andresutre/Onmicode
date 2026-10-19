@@ -19,7 +19,11 @@ import {
 } from "../../core/child";
 import type { PiFlavor } from "./piFlavor";
 import { PiRpc } from "./piClient";
-import { piSubagentEvents } from "./piSubagents";
+import {
+  piBackgroundRunId,
+  piFinishedRunIds,
+  piSubagentEvents,
+} from "./piSubagents";
 import {
   addPiTurnUsage,
   agentEndWillRetry,
@@ -121,6 +125,8 @@ type Live = {
   /** Reason the turn failed, held until we know it is not being retried. */
   turnError: string | null;
   turnUsage: PiTurnUsage;
+  /** pi-subagents runs launched in the background and not yet reported done. */
+  backgroundRuns: Set<string>;
 };
 
 type Resume = {
@@ -390,6 +396,14 @@ export async function cancelTurn(
   ]);
 }
 
+export function hasBackgroundWork(
+  flavor: PiFlavor,
+  sessionId: string,
+): boolean {
+  const live = stateFor(flavor).liveByThread.get(sessionId);
+  return live != null && live.backgroundRuns.size > 0;
+}
+
 export async function stopSession(
   flavor: PiFlavor,
   sessionId: string,
@@ -529,6 +543,7 @@ async function startLive(
     emittedReasoning: "",
     turnError: null,
     turnUsage: { done: {}, open: {} },
+    backgroundRuns: new Set(),
   };
   liveRef.current = live;
 
@@ -757,6 +772,13 @@ function handleFrame(
   if (live.muteUpdates) return;
 
   const type = stringField(rec, "type");
+  if (type === "message_start") {
+    const message = asRecord(rec.message);
+    if (message) {
+      for (const runId of piFinishedRunIds(message))
+        live.backgroundRuns.delete(runId);
+    }
+  }
   if (flavor.id === "omp") {
     // OMP emits persisted custom_message entries on the live RPC stream as a
     // message_start/message_end pair. Render the start once; consume the end
@@ -953,6 +975,10 @@ function handleFrame(
   const execEnd = toolExecutionEndFromEvent(rec);
   if (execEnd) {
     const tool = live.toolsById.get(execEnd.id);
+    if (tool && toolKindFromName(tool.name) === "agent" && !execEnd.isError) {
+      const runId = piBackgroundRunId(rec.result);
+      if (runId) live.backgroundRuns.add(runId);
+    }
     if (tool) {
       tool.finished = true;
       live.onEvent({

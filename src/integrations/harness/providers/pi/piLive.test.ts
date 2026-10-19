@@ -34,7 +34,7 @@ vi.mock("./piClient", () => ({
   },
 }));
 
-import { compactPiContext, stopPiSession } from "./pi";
+import { compactPiContext, piHasBackgroundWork, stopPiSession } from "./pi";
 import type { HarnessEvent } from "../../core/types";
 
 describe("Pi live session", () => {
@@ -125,6 +125,59 @@ describe("Pi live session", () => {
       window: 200_000,
     });
     await stopPiSession("pi-compact");
+  });
+
+  it("reports background subagent runs until their completion notice arrives", async () => {
+    await compactPiContext({
+      sessionId: "pi-background",
+      cwd: "/repo",
+      model: "pi:default",
+      runtimeMode: "supervised",
+      onEvent: () => undefined,
+    });
+    const frame = mocks.frames[0]!;
+    const launch = (toolCallId: string, details: Record<string, unknown>) => {
+      frame({
+        type: "tool_execution_start",
+        toolCallId,
+        toolName: "subagent",
+        args: { agent: "worker", task: "Index the repo" },
+      });
+      frame({
+        type: "tool_execution_end",
+        toolCallId,
+        toolName: "subagent",
+        result: { content: [{ type: "text", text: "Detached." }], details },
+        isError: false,
+      });
+    };
+
+    launch("foreground", { mode: "single", runId: "fg", results: [] });
+    launch("status", { mode: "management", asyncId: "bg-1", results: [] });
+    expect(piHasBackgroundWork("pi-background")).toBe(false);
+
+    launch("single", { mode: "single", runId: "bg-1", asyncId: "bg-1", results: [] });
+    launch("workflow", { mode: "workflow", runId: "wf-1", asyncId: "wf-1", results: [] });
+    expect(piHasBackgroundWork("pi-background")).toBe(true);
+
+    const notify = (runs: Record<string, unknown>[]) =>
+      frame({
+        type: "message_start",
+        message: {
+          role: "custom",
+          customType: "subagent-notify",
+          content: "Background task completed",
+          display: false,
+          details: { runs },
+        },
+      });
+    notify([{ agent: "worker", status: "completed", runId: "bg-1" }]);
+    expect(piHasBackgroundWork("pi-background")).toBe(true);
+    notify([{ agent: "workflow", status: "completed", runId: "wf-1", workflowRunId: "wf-1" }]);
+    expect(piHasBackgroundWork("pi-background")).toBe(false);
+
+    await stopPiSession("pi-background");
+    expect(piHasBackgroundWork("pi-background")).toBe(false);
   });
 
   it("publishes readable Ponytail status and extension notifications", async () => {
