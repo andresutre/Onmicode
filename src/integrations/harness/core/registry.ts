@@ -77,9 +77,9 @@ export type HarnessAdapter = {
   /** Keep a timed question open once the user starts answering it. */
   keepQuestionOpen?(sessionId: string, requestId: number): void;
   /**
-   * True while the session's child still runs work it started in the
-   * background (e.g. async subagents). Idle parking waits for it to finish,
-   * since stopping the child kills that work.
+   * True while the session's child still runs work outside a MonoCode turn:
+   * background subagents, or an agent loop one of them woke. Idle parking
+   * waits for it to finish, since stopping the child kills that work.
    */
   hasBackgroundWork?(sessionId: string): boolean;
   /** Kill the child but keep resume state for later rebind. */

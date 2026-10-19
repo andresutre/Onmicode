@@ -127,6 +127,12 @@ type Live = {
   turnUsage: PiTurnUsage;
   /** pi-subagents runs launched in the background and not yet reported done. */
   backgroundRuns: Set<string>;
+  /**
+   * Pi is running an agent loop, from `agent_start` to `agent_settled`. A
+   * finished background run can start one on its own, outside any MonoCode
+   * turn, so this is tracked apart from `activeTurn`.
+   */
+  agentRunning: boolean;
 };
 
 type Resume = {
@@ -401,7 +407,7 @@ export function hasBackgroundWork(
   sessionId: string,
 ): boolean {
   const live = stateFor(flavor).liveByThread.get(sessionId);
-  return live != null && live.backgroundRuns.size > 0;
+  return live != null && (live.backgroundRuns.size > 0 || live.agentRunning);
 }
 
 export async function stopSession(
@@ -544,6 +550,7 @@ async function startLive(
     turnError: null,
     turnUsage: { done: {}, open: {} },
     backgroundRuns: new Set(),
+    agentRunning: false,
   };
   liveRef.current = live;
 
@@ -772,6 +779,8 @@ function handleFrame(
   if (live.muteUpdates) return;
 
   const type = stringField(rec, "type");
+  if (type === "agent_start") live.agentRunning = true;
+  if (isAgentSettled(rec)) live.agentRunning = false;
   if (type === "message_start") {
     const message = asRecord(rec.message);
     if (message) {

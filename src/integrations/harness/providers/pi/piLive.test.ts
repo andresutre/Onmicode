@@ -180,6 +180,60 @@ describe("Pi live session", () => {
     expect(piHasBackgroundWork("pi-background")).toBe(false);
   });
 
+  it("stays busy while a completion notice runs its own agent loop", async () => {
+    await compactPiContext({
+      sessionId: "pi-woken",
+      cwd: "/repo",
+      model: "pi:default",
+      runtimeMode: "supervised",
+      onEvent: () => undefined,
+    });
+    const frame = mocks.frames[0]!;
+    frame({
+      type: "tool_execution_start",
+      toolCallId: "launch",
+      toolName: "subagent",
+      args: { agent: "worker", task: "Index the repo" },
+    });
+    frame({
+      type: "tool_execution_end",
+      toolCallId: "launch",
+      toolName: "subagent",
+      result: {
+        content: [],
+        details: {
+          mode: "single",
+          runId: "bg-2",
+          asyncId: "bg-2",
+          results: [],
+        },
+      },
+      isError: false,
+    });
+
+    frame({ type: "agent_start" });
+    frame({
+      type: "message_start",
+      message: {
+        role: "custom",
+        customType: "subagent-notify",
+        content: "Background task completed",
+        display: false,
+        details: {
+          runs: [{ agent: "worker", status: "completed", runId: "bg-2" }],
+        },
+      },
+    });
+    expect(piHasBackgroundWork("pi-woken")).toBe(true);
+
+    frame({ type: "agent_end", willRetry: false });
+    expect(piHasBackgroundWork("pi-woken")).toBe(true);
+    frame({ type: "agent_settled" });
+    expect(piHasBackgroundWork("pi-woken")).toBe(false);
+
+    await stopPiSession("pi-woken");
+  });
+
   it("publishes readable Ponytail status and extension notifications", async () => {
     const events: HarnessEvent[] = [];
     await compactPiContext({
