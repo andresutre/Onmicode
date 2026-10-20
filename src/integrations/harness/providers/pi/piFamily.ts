@@ -23,7 +23,15 @@ import {
 } from "../../core/child";
 import type { PiFlavor } from "./piFlavor";
 import { PiRpc } from "./piClient";
-import { piSubagentEvents } from "./piSubagents";
+import {
+  isActiveRunState,
+  piAsyncRunId,
+  piBackgroundRunsFromFrame,
+  piSubagentEvents,
+  piSubagentNotice,
+  runRowStatus,
+  type PiBackgroundRun,
+} from "./piSubagents";
 import {
   addPiTurnUsage,
   agentEndWillRetry,
@@ -125,7 +133,39 @@ type Live = {
   /** Reason the turn failed, held until we know it is not being retried. */
   turnError: string | null;
   turnUsage: PiTurnUsage;
+  /** Between Pi's `agent_start` and `agent_settled`. */
+  piRunning: boolean;
+  /**
+   * pi-subagents background runs still going, by run id. Each ends in a
+   * notice that wakes Pi for another run, so the turn stays open until then.
+   */
+  backgroundRuns: Map<string, BackgroundRun>;
+  /** Pi settled with background runs left; the turn waits on them. */
+  waitingOnBackground: boolean;
+  /** Background work ended; Pi's wake-up run should start shortly. */
+  awaitingWake: ReturnType<typeof setTimeout> | null;
+  /** Last background list sent to the UI, to skip repeats. */
+  backgroundKey: string;
+  /**
+   * Rows of runs that already ended, by run id. The status snapshot usually
+   * reports the end before the notice that carries the run's report.
+   */
+  endedRunRows: Map<string, string>;
 };
+
+type BackgroundRun = {
+  label: string;
+  /** Transcript row of the `subagent` call that launched it. */
+  rowId?: string;
+  /** Seen in a status snapshot, so a later snapshot without it means ended. */
+  reported: boolean;
+};
+
+/**
+ * How long a finished background run may take to wake Pi before the turn is
+ * let go anyway. The wake-up normally starts within a second.
+ */
+const WAKE_GRACE_MS = 15_000;
 
 type Resume = {
   sessionId: string;
@@ -332,6 +372,17 @@ export async function steerTurn(
   const live = stateFor(flavor).liveByThread.get(input.sessionId);
   if (!live?.activeTurn) throw new TurnNotReadyError("No active turn to steer");
   const message = input.text.trim();
+  if (live.waitingOnBackground && !live.piRunning) {
+    // Pi is idle while its subagents run; a steer would sit queued until
+    // they wake it, so start the run now inside the same turn.
+    const prompt = buildPiPrompt({
+      text: message,
+      attachments: input.attachments,
+    });
+    if (!prompt.message && !Array.isArray(prompt.images)) return;
+    await live.rpc.request(prompt);
+    return;
+  }
   const buildCommand =
     flavor.id === "omp" && message.startsWith("/")
       ? (input: Parameters<typeof buildPiPrompt>[0]) =>
@@ -388,6 +439,7 @@ export async function cancelTurn(
     question.resolve({ kind: "skipped" });
   live.questions.clear();
   await live.rpc.request({ type: "abort" }, 5_000).catch(() => undefined);
+  await stopBackgroundRuns(flavor, live);
   finishActiveTurn(live, [
     { type: "message.completed" },
     { type: "reasoning.completed" },
@@ -410,6 +462,7 @@ export async function stopSession(
     for (const question of live.questions.values())
       question.resolve({ kind: "skipped" });
     live.questions.clear();
+    clearAwaitingWake(live);
     live.activeTurn = false;
     live.turnDone?.();
     live.turnDone = null;
@@ -533,6 +586,12 @@ async function startLive(
     emittedReasoning: "",
     turnError: null,
     turnUsage: { done: {}, open: {} },
+    piRunning: false,
+    backgroundRuns: new Map(),
+    waitingOnBackground: false,
+    awaitingWake: null,
+    backgroundKey: "",
+    endedRunRows: new Map(),
   };
   liveRef.current = live;
 
@@ -615,6 +674,8 @@ async function runTurn(
   live.retrying = false;
   live.settleToken += 1;
   live.settling = false;
+  live.waitingOnBackground = false;
+  clearAwaitingWake(live);
   const promptId = `mc_turn_${crypto.randomUUID()}`;
   live.promptId = promptId;
 
@@ -632,6 +693,9 @@ async function runTurn(
           ...buildPiPrompt({
             text: input.text,
             attachments: input.attachments,
+            // Pi can be mid-run without a turn of ours, woken by a finished
+            // subagent; a plain prompt is refused then.
+            streaming: live.piRunning,
           }),
           id: promptId,
         },
@@ -640,9 +704,11 @@ async function runTurn(
       turnPromise.then(() => null),
     ]);
     input.onAccepted?.();
+    const data = asRecord(response?.data);
     if (
-      flavor.id === "omp" &&
-      asRecord(response?.data)?.agentInvoked === false
+      (flavor.id === "omp" && data?.agentInvoked === false) ||
+      // An extension command handled it, so no run follows.
+      (flavor.id === "pi" && data?.disposition === "handled" && !live.piRunning)
     ) {
       finishActiveTurn(live, [
         { type: "message.completed" },
@@ -664,7 +730,195 @@ async function runTurn(
     live.rpc.cancelRequest(promptId);
     live.turnDone = null;
     live.turnFailed = null;
+    live.waitingOnBackground = false;
+    clearAwaitingWake(live);
+    syncBackgroundWait(live);
   }
+}
+
+/**
+ * Stop means the whole run, including subagents Pi left going in the
+ * background. Otherwise they finish later and wake Pi up again.
+ */
+async function stopBackgroundRuns(flavor: PiFlavor, live: Live): Promise<void> {
+  if (flavor.id !== "pi") return;
+  const ids = [...live.backgroundRuns.keys()];
+  live.waitingOnBackground = false;
+  clearAwaitingWake(live);
+  for (const id of ids) {
+    await live.rpc
+      .request(buildPiPrompt({ text: `/subagents-stop ${id}` }), 5_000)
+      .catch(() => undefined);
+    const run = live.backgroundRuns.get(id);
+    live.backgroundRuns.delete(id);
+    if (run?.rowId)
+      live.onEvent({
+        type: "tool.updated",
+        callId: run.rowId,
+        kind: "agent",
+        status: "failed",
+        detail: "Stopped.",
+      });
+  }
+  syncBackgroundWait(live);
+}
+
+function clearAwaitingWake(live: Live): void {
+  if (!live.awaitingWake) return;
+  clearTimeout(live.awaitingWake);
+  live.awaitingWake = null;
+}
+
+/** What the turn is waiting on once Pi has yielded with subagents running. */
+function syncBackgroundWait(live: Live): void {
+  const waiting =
+    live.activeTurn && live.waitingOnBackground && !live.cancelled
+      ? [...live.backgroundRuns.values()].map((run) => run.label)
+      : [];
+  const key = waiting.join("\n");
+  if (key === live.backgroundKey) return;
+  live.backgroundKey = key;
+  if (live.muteUpdates) return;
+  live.onEvent({ type: "background.updated", tasks: waiting });
+}
+
+/**
+ * Pi went idle. With background subagents still running, their completion
+ * wakes Pi for another run, so the turn stays open for it; otherwise it ends.
+ */
+function settleOrWait(flavor: PiFlavor, live: Live): void {
+  flushTurnError(flavor, live);
+  if (live.activeTurn && !live.cancelled && live.backgroundRuns.size > 0) {
+    if (!live.waitingOnBackground) {
+      live.waitingOnBackground = true;
+      // The wake-up reply is a new message, not more of this one.
+      live.onEvent({ type: "message.completed" });
+      live.onEvent({ type: "reasoning.completed" });
+    }
+    syncBackgroundWait(live);
+    return;
+  }
+  void settleTurn(live);
+}
+
+/** Pi began a run of its own inside this turn, woken by a finished subagent. */
+function notePiRunStarted(live: Live): void {
+  live.piRunning = true;
+  clearAwaitingWake(live);
+  if (live.cancelled && !live.activeTurn) {
+    // Stopped means stopped: a subagent's late notice must not restart Pi.
+    void live.rpc.request({ type: "abort" }, 5_000).catch(() => undefined);
+    return;
+  }
+  if (!live.waitingOnBackground) return;
+  live.waitingOnBackground = false;
+  live.emittedAssistant = "";
+  live.emittedReasoning = "";
+  syncBackgroundWait(live);
+}
+
+function backgroundRowStatus(
+  live: Live,
+  run: BackgroundRun,
+  status: string,
+  extra: { agentModel?: string; detail?: string } = {},
+): void {
+  if (!run.rowId || live.muteUpdates) return;
+  live.onEvent({
+    type: "tool.updated",
+    callId: run.rowId,
+    kind: "agent",
+    status,
+    ...extra,
+  });
+}
+
+function finishBackgroundRun(
+  live: Live,
+  runId: string,
+  state: string,
+  detail?: string,
+): void {
+  const run = live.backgroundRuns.get(runId);
+  if (!run) {
+    const rowId = live.endedRunRows.get(runId);
+    if (rowId && detail)
+      backgroundRowStatus(
+        live,
+        { label: "", rowId, reported: true },
+        runRowStatus(state),
+        { detail },
+      );
+    return;
+  }
+  live.backgroundRuns.delete(runId);
+  if (run.rowId) live.endedRunRows.set(runId, run.rowId);
+  backgroundRowStatus(live, run, runRowStatus(state), detail ? { detail } : {});
+  if (
+    live.waitingOnBackground &&
+    live.activeTurn &&
+    !live.piRunning &&
+    !live.awaitingWake
+  ) {
+    // Pi wakes on its own; if it never does (it was stopped), let go.
+    live.awaitingWake = setTimeout(() => {
+      live.awaitingWake = null;
+      if (live.piRunning || !live.waitingOnBackground) return;
+      if (live.backgroundRuns.size > 0) return;
+      live.waitingOnBackground = false;
+      syncBackgroundWait(live);
+      void settleTurn(live);
+    }, WAKE_GRACE_MS);
+  }
+  syncBackgroundWait(live);
+}
+
+/** A `subagent` call detached: its run continues after the tool returns. */
+function noteBackgroundLaunch(
+  live: Live,
+  tool: InFlightTool,
+  runId: string,
+): void {
+  const known = live.backgroundRuns.get(runId);
+  const label =
+    stringField(tool.input, "agent") ?? known?.label ?? "Background subagent";
+  const run: BackgroundRun = {
+    label,
+    rowId: tool.id,
+    reported: known?.reported ?? false,
+  };
+  live.backgroundRuns.set(runId, run);
+  backgroundRowStatus(live, run, "in_progress");
+}
+
+/** pi-subagents' status snapshot of every background run in the session. */
+function noteBackgroundSnapshot(live: Live, runs: PiBackgroundRun[]): void {
+  const seen = new Set<string>();
+  for (const snapshot of runs) {
+    seen.add(snapshot.id);
+    if (!isActiveRunState(snapshot.state)) {
+      finishBackgroundRun(live, snapshot.id, snapshot.state);
+      continue;
+    }
+    let run = live.backgroundRuns.get(snapshot.id);
+    if (!run) {
+      run = { label: snapshot.label, reported: true };
+      live.backgroundRuns.set(snapshot.id, run);
+    }
+    run.reported = true;
+    backgroundRowStatus(
+      live,
+      run,
+      "in_progress",
+      snapshot.model ? { agentModel: snapshot.model } : {},
+    );
+  }
+  // A run the widget showed and no longer does has ended.
+  for (const [id, run] of [...live.backgroundRuns]) {
+    if (run.reported && !seen.has(id))
+      finishBackgroundRun(live, id, "complete");
+  }
+  syncBackgroundWait(live);
 }
 
 /**
@@ -725,6 +979,17 @@ function interjectionFromCustomMessage(
   };
 }
 
+function piSubagentInterjection(
+  message: Record<string, unknown>,
+): Extract<HarnessEvent, { type: "interjection" }> | undefined {
+  const customType = stringField(message, "customType");
+  if (message.display !== true || !customType?.startsWith("subagent-"))
+    return undefined;
+  const notice = piSubagentNotice(message);
+  const text = notice ? notice.report : customMessageText(message.content);
+  return text.trim() ? { type: "interjection", text, customType } : undefined;
+}
+
 function handleFrame(
   flavor: PiFlavor,
   sessionId: string,
@@ -743,38 +1008,58 @@ function handleFrame(
     }
     return;
   }
-  if (
-    flavor.id === "omp" &&
-    rec.type === "extension_ui_request" &&
-    rec.method === "cancel"
-  ) {
+  if (rec.type === "extension_ui_request" && rec.method === "cancel") {
     for (const question of live.questions.values()) {
       if (question.id === rec.id) question.resolve({ kind: "skipped" });
     }
     return;
   }
+  const backgroundRuns = piBackgroundRunsFromFrame(rec);
+  if (backgroundRuns) {
+    noteBackgroundSnapshot(live, backgroundRuns);
+    return;
+  }
   const ui = parseExtensionUiRequest(rec);
   if (ui) {
-    void handleExtensionUi(flavor, sessionId, live, ui);
+    void handleExtensionUi(sessionId, live, ui);
     return;
+  }
+  const type = stringField(rec, "type");
+  if (type === "agent_start") notePiRunStarted(live);
+  if (isAgentSettled(rec)) live.piRunning = false;
+  if (type === "message_start") {
+    const notice = piSubagentNotice(asRecord(rec.message) ?? {});
+    // The row of the run that ended takes its report.
+    for (const run of notice?.runs ?? [])
+      finishBackgroundRun(
+        live,
+        run.runId,
+        run.status ?? "complete",
+        notice?.report,
+      );
   }
   if (live.muteUpdates) return;
 
-  const type = stringField(rec, "type");
-  if (flavor.id === "omp") {
-    // OMP emits persisted custom_message entries on the live RPC stream as a
-    // message_start/message_end pair. Render the start once; consume the end
-    // and hidden custom messages so none can leak through a generic path.
-    if (type === "message_start" || type === "message_end") {
-      const message = asRecord(rec.message);
-      if (message?.role === "custom") {
-        if (type === "message_start") {
-          const interjection = interjectionFromCustomMessage(message);
-          if (interjection) live.onEvent(interjection);
-        }
-        return;
+  // Extensions' messages arrive as a custom message_start/message_end pair.
+  // Render the start once; consume the end and hidden ones so none can leak
+  // through a generic path. Pi only shows pi-subagents' own (command replies
+  // such as /subagents-stop, failed background runs); omp's advisor format
+  // is omp's alone.
+  if (type === "message_start" || type === "message_end") {
+    const message = asRecord(rec.message);
+    if (message?.role === "custom") {
+      if (type === "message_start") {
+        const interjection =
+          flavor.id === "omp"
+            ? interjectionFromCustomMessage(message)
+            : piSubagentInterjection(message);
+        if (interjection) live.onEvent(interjection);
       }
+      return;
     }
+  }
+
+  if (flavor.id === "omp") {
     if (type === "advisor_yielded") {
       live.onEvent({ type: "status", text: "Advisor reviewed this turn" });
       return;
@@ -977,21 +1262,27 @@ function handleFrame(
           execEnd.isError,
         ))
           live.onEvent(event);
+        const runId = execEnd.isError ? undefined : piAsyncRunId(rec.result);
+        if (runId) noteBackgroundLaunch(live, tool, runId);
       }
     }
   }
 
   if (isAgentSettled(rec)) {
-    flushTurnError(flavor, live);
-    void settleTurn(live);
+    if (!live.activeTurn && !live.turnDone) {
+      // A run Pi started on its own after the turn let go still streamed.
+      live.onEvent({ type: "message.completed" });
+      live.onEvent({ type: "reasoning.completed" });
+      return;
+    }
+    settleOrWait(flavor, live);
     return;
   }
   const willRetry = agentEndWillRetry(rec);
   // The retry carries the real answer, so the attempt it replaces stays quiet.
   if (willRetry === true) live.turnError = null;
   if (willRetry === false && !live.compacting && !live.retrying) {
-    flushTurnError(flavor, live);
-    void settleTurn(live);
+    settleOrWait(flavor, live);
   }
 }
 
@@ -1032,7 +1323,6 @@ async function settleTurn(live: Live): Promise<void> {
 }
 
 async function handleExtensionUi(
-  flavor: PiFlavor,
   sessionId: string,
   live: Live,
   request: PiExtensionUiRequest,
@@ -1054,10 +1344,9 @@ async function handleExtensionUi(
   }
 
   if (
-    flavor.id === "omp" &&
-    (request.method === "select" ||
-      request.method === "input" ||
-      request.method === "editor")
+    request.method === "select" ||
+    request.method === "input" ||
+    request.method === "editor"
   ) {
     const uiId = live.nextApprovalUiId++;
     const replyPromise = new Promise<UserQuestionReply>((resolve) => {
