@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   addPiTurnUsage,
   agentEndWillRetry,
+  askUserFromRequest,
+  askUserReplyValue,
   assistantDeltaFromEvent,
   buildPiPrompt,
   buildPiSpawnArgs,
@@ -77,7 +79,7 @@ describe("buildPiSpawnArgs", () => {
       "--mode",
       "rpc",
       "--tools",
-      "read,grep,find,ls",
+      "read,grep,find,ls,ask_user",
     ]);
     expect(buildPiSpawnArgs(OMP_FLAVOR, { plan: true })).toEqual([
       "--mode",
@@ -169,6 +171,77 @@ describe("buildPiPrompt", () => {
       { entryId: "u1", text: "first" },
       { entryId: "u2", text: "second" },
     ]);
+  });
+});
+
+describe("ask_user dialog", () => {
+  const request = parseExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "ask-1",
+    method: "editor",
+    title: "onmicode:ask_user",
+    prefill: JSON.stringify({
+      toolCallId: "call-7",
+      questions: [
+        {
+          question: "Which database?",
+          header: "Database",
+          options: [
+            { label: "Postgres", description: "Relational" },
+            { label: "SQLite" },
+          ],
+          multiSelect: false,
+        },
+        { question: "Anything else?", options: [] },
+      ],
+    }),
+  })!;
+
+  it("reads the questions from the editor prefill", () => {
+    const ask = askUserFromRequest(request);
+    expect(ask?.callId).toBe("call-7");
+    expect(ask?.questions).toHaveLength(2);
+    expect(ask?.questions[0]).toMatchObject({
+      header: "Database",
+      prompt: "Which database?",
+      multiSelect: false,
+      allowCustom: true,
+      options: [
+        { label: "Postgres", description: "Relational" },
+        { label: "SQLite" },
+      ],
+    });
+  });
+
+  it("leaves other editor dialogs alone", () => {
+    expect(
+      askUserFromRequest({ id: "e", method: "editor", title: "Edit", prefill: "{}" }),
+    ).toBeNull();
+    expect(
+      askUserFromRequest({
+        id: "e",
+        method: "editor",
+        title: "onmicode:ask_user",
+        prefill: "not json",
+      }),
+    ).toBeNull();
+  });
+
+  it("answers with each answered question as JSON", () => {
+    const { questions } = askUserFromRequest(request)!;
+    const [db, other] = questions;
+    const value = askUserReplyValue(questions, {
+      kind: "answered",
+      answers: { [db.id]: [db.options[1].id] },
+      custom: { [other.id]: "Keep it small" },
+    });
+    expect(JSON.parse(value!)).toEqual({
+      answers: [
+        { question: "Which database?", answer: "SQLite" },
+        { question: "Anything else?", answer: "Keep it small" },
+      ],
+    });
+    expect(askUserReplyValue(questions, { kind: "skipped" })).toBeUndefined();
   });
 });
 

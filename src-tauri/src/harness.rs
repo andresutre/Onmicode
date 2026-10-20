@@ -951,6 +951,9 @@ pub fn harness_spawn(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     prepare_child(&mut cmd, &command);
+    if loads_pi_ask_user(binary_provider.as_deref(), &args) {
+        apply_pi_ask_user(&app, &mut cmd)?;
+    }
     apply_provider_account(&app, &mut cmd, account.as_ref())?;
     crate::control::configure_child(&app, &session_id, &mut cmd);
 
@@ -1132,6 +1135,35 @@ pub fn provider_account_remove(
             dir.display()
         )
     })
+}
+
+const PI_ASK_USER: &str = include_str!("pi_ask_user.mjs");
+
+/// Pi's agent sessions only: other subcommands (update, auth) take no `-e`,
+/// and one-shot jobs started without extensions have no one to ask.
+fn loads_pi_ask_user(binary_provider: Option<&str>, args: &[String]) -> bool {
+    binary_provider == Some("pi")
+        && args.first().map(String::as_str) == Some("--mode")
+        && !args.iter().any(|arg| arg == "--no-extensions")
+}
+
+/// Pi has no tool for asking the user. Every Pi session Onmicode starts loads
+/// a small extension that adds `ask_user`, whose questions Onmicode shows in
+/// its own question card.
+fn apply_pi_ask_user(app: &AppHandle, cmd: &mut Command) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("pi");
+    let extension = dir.join("onmicode-ask-user.mjs");
+    if std::fs::read_to_string(&extension).ok().as_deref() != Some(PI_ASK_USER) {
+        std::fs::create_dir_all(&dir)
+            .and_then(|()| std::fs::write(&extension, PI_ASK_USER))
+            .map_err(|error| format!("Could not write the Pi ask_user extension: {error}"))?;
+    }
+    cmd.arg("-e").arg(&extension);
+    Ok(())
 }
 
 /// Pi has no logins of its own to switch: its profiles are Claude's.
@@ -4075,6 +4107,22 @@ mod exec_allowlist_tests {
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn pi_ask_user_loads_only_into_pi_agent_sessions() {
+        assert!(loads_pi_ask_user(Some("pi"), &args(&["--mode", "rpc"])));
+        assert!(loads_pi_ask_user(
+            Some("pi"),
+            &args(&["--mode", "rpc", "--session", "abc"])
+        ));
+        assert!(!loads_pi_ask_user(
+            Some("pi"),
+            &args(&["--mode", "rpc", "--no-session", "--no-extensions"])
+        ));
+        assert!(!loads_pi_ask_user(Some("pi"), &args(&["update"])));
+        assert!(!loads_pi_ask_user(Some("omp"), &args(&["--mode", "rpc"])));
+        assert!(!loads_pi_ask_user(None, &args(&["--mode", "rpc"])));
     }
 
     #[test]

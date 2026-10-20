@@ -6,9 +6,10 @@ import {
   DEFAULT_PROVIDER_ACCOUNT_ID,
   sameProviderAccountId,
 } from "../../../../features/providers/model/providerAccounts";
-import type {
-  UserQuestion,
-  UserQuestionReply,
+import {
+  questionPromptTitle,
+  type UserQuestion,
+  type UserQuestionReply,
 } from "../../../../features/sessions/model/userQuestion";
 import { answerText } from "../../../../features/sessions/model/questionAnswers";
 import type {
@@ -42,6 +43,8 @@ import {
   asRecord,
   assistantDeltaFromEvent,
   buildPiPrompt,
+  askUserFromRequest,
+  askUserReplyValue,
   buildPiSpawnArgs,
   buildPiSteer,
   contextFromSessionStats,
@@ -1362,6 +1365,39 @@ async function handleExtensionUi(
     await writeChild(
       sessionId,
       JSON.stringify(extensionUiResponse(request, "deny")),
+    ).catch(() => undefined);
+    return;
+  }
+
+  const askUser = askUserFromRequest(request);
+  if (askUser) {
+    const uiId = live.nextApprovalUiId++;
+    const replyPromise = new Promise<UserQuestionReply>((resolve) => {
+      live.questions.set(uiId, { id: request.id, resolve });
+    });
+    live.onEvent({
+      type: "question.asked",
+      requestId: uiId,
+      title: questionPromptTitle(askUser.questions),
+      questions: askUser.questions,
+      ...(askUser.callId ? { callId: askUser.callId } : {}),
+    });
+    const reply = await replyPromise;
+    live.questions.delete(uiId);
+    const value = askUserReplyValue(askUser.questions, reply);
+    live.onEvent({
+      type: "question.resolved",
+      requestId: uiId,
+      decision: value === undefined ? "skipped" : "answered",
+      ...(value !== undefined && reply.kind === "answered" ? { reply } : {}),
+    });
+    await writeChild(
+      sessionId,
+      JSON.stringify({
+        type: "extension_ui_response",
+        id: request.id,
+        ...(value === undefined ? { cancelled: true } : { value }),
+      }),
     ).catch(() => undefined);
     return;
   }
