@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Code,
   DashboardSquare,
+  Gauge,
   Inbox,
   PanelLeft,
   GitBranch,
@@ -66,6 +67,7 @@ const APP_VIEW_ICONS = {
   inbox: Inbox,
   notes: StickyNote,
   automations: Zap,
+  usage: Gauge,
 };
 
 export type Tab = {

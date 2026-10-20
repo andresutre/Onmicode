@@ -32,6 +32,7 @@ const COMMANDS: { id: string; label: string; keybinding?: string; keywords?: str
   { id: "inbox", label: "Open Inbox", keywords: "notifications" },
   { id: "notes", label: "Open Notes" },
   { id: "automations", label: "Open Automations", keywords: "schedule" },
+  { id: "usage", label: "Open Usage", keywords: "limits quota rate plan accounts" },
   { id: "settings", label: "Open Settings", keybinding: "App: Settings", keywords: "preferences" },
   { id: "keybindings", label: "Keyboard Shortcuts", keywords: "keybindings settings" },
   { id: "toggle-sidebar", label: "Toggle Sidebar", keybinding: "App: Toggle Sidebar" },

@@ -759,6 +759,13 @@ const AutomationsView = lazySurface(
   },
   { suspense: false },
 );
+const UsageView = lazySurface(
+  async () => {
+    const module = await import("../features/usage/ui/UsageView");
+    return { default: module.UsageView };
+  },
+  { suspense: false },
+);
 
 type LinkedWorkItemPanelState = {
   item: LinkedWorkItem;
@@ -1079,6 +1086,7 @@ function Workspace({
   const openingInboxSessions = useRef(new Map<string, Promise<string>>());
   const [notesViewOpen, setNotesViewOpen] = useState(false);
   const [automationsViewOpen, setAutomationsViewOpen] = useState(false);
+  const [usageViewOpen, setUsageViewOpen] = useState(false);
   const [openAppViews, setOpenAppViews] = useState<AppView[]>([]);
   const [titleTabOrder, setTitleTabOrder] = useState(() =>
     tabs.map((tab) => tab.id),
@@ -1091,7 +1099,9 @@ function Workspace({
         ? "notes"
         : automationsViewOpen
           ? "automations"
-          : undefined;
+          : usageViewOpen
+            ? "usage"
+            : undefined;
   const rememberAppView = useCallback((view: AppView) => {
     setOpenAppViews((current) =>
       current.includes(view) ? current : [...current, view],
@@ -1194,6 +1204,7 @@ function Workspace({
     inbox: false,
     notes: false,
     automations: false,
+    usage: false,
   });
   const [updateNotice, setUpdateNotice] = useState(installedUpdate);
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
@@ -1397,6 +1408,7 @@ function Workspace({
       !inboxViewOpen &&
       !notesViewOpen &&
       !automationsViewOpen &&
+      !usageViewOpen &&
       !settingsOpen,
     standaloneSessionId: inboxViewOpen ? inboxAskPortal?.sessionId : undefined,
   };
@@ -1404,6 +1416,8 @@ function Workspace({
   notesViewOpenRef.current = notesViewOpen;
   const automationsViewOpenRef = useRef(automationsViewOpen);
   automationsViewOpenRef.current = automationsViewOpen;
+  const usageViewOpenRef = useRef(usageViewOpen);
+  usageViewOpenRef.current = usageViewOpen;
   const settingsOpenRef = useRef(settingsOpen);
   settingsOpenRef.current = settingsOpen;
   const sessionNavigationIdsRef = useRef<readonly string[]>([]);
@@ -1442,6 +1456,7 @@ function Workspace({
         LinkedWorkItemPanel.preload,
         AutomationsView.preload,
         listAutomations,
+        UsageView.preload,
         ...(notesEnabled ? [NotesView.preload, loadNotes] : []),
       ]),
     [notesEnabled],
@@ -2020,6 +2035,7 @@ function Workspace({
             !inboxViewOpenRef.current &&
             !notesViewOpenRef.current &&
             !automationsViewOpenRef.current &&
+            !usageViewOpenRef.current &&
             !settingsOpenRef.current
           ) {
             setComposerFocused(true);
@@ -2056,6 +2072,7 @@ function Workspace({
     searchViewOpen,
     notesViewOpen,
     automationsViewOpen,
+    usageViewOpen,
     settingsOpen,
     flushForegroundHarnessEvents,
   ]);
@@ -2560,6 +2577,7 @@ function Workspace({
     setInboxViewOpen(false);
     setNotesViewOpen(false);
     setAutomationsViewOpen(false);
+    setUsageViewOpen(false);
     const cwd = sidebarCwd;
     const session = newWorkspaceSession(cwd, sessionDefaults?.runtimeMode);
     const tab = newTab(session.id);
@@ -2576,6 +2594,7 @@ function Workspace({
       setInboxViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       const existing = findRemoteSessionTab(
         tabsRef.current,
         sessionsRef.current,
@@ -2604,6 +2623,7 @@ function Workspace({
         setInboxViewOpen(false);
         setNotesViewOpen(false);
         setAutomationsViewOpen(false);
+        setUsageViewOpen(false);
         const cwd =
           item.projectPath || active?.cwd || sessionDefaults?.cwd || projectCwd;
         setSidebarTab("sessions", cwd);
@@ -2643,6 +2663,7 @@ function Workspace({
       setInboxViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       const cwd =
         (card.sourceCwd && looksLikeProject(card.sourceCwd)
           ? card.sourceCwd
@@ -2689,6 +2710,7 @@ function Workspace({
       setInboxViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       const session = sessionForPromptLink(
         launch,
         sessionDefaults?.runtimeMode,
@@ -4576,6 +4598,7 @@ function Workspace({
       setInboxViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       if (looksLikeProject(session.cwd))
         setProjectCwd(normalizeProjectPath(session.cwd));
       const linkedUpdate = linkedSessionUpdatesRef.current.get(session.id);
@@ -4612,6 +4635,7 @@ function Workspace({
       setInboxViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       setSettingsOpen(false);
       setFilePickerOpen(false);
       setSidebarTab("sessions", session.cwd);
@@ -5180,6 +5204,7 @@ function Workspace({
             inboxViewOpenRef.current ||
             notesViewOpenRef.current ||
             automationsViewOpenRef.current ||
+            usageViewOpenRef.current ||
             settingsOpenRef.current ||
             filePickerOpenRef.current ||
             whatsNewVersionRef.current,
@@ -5715,6 +5740,7 @@ function Workspace({
       setInboxViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
 
       // At most one folder can take the blank session, and it keeps the
       // retargeting rules `onCwdChange` already owns.
@@ -7529,6 +7555,7 @@ function Workspace({
           setInboxViewOpen(false);
           setNotesViewOpen(false);
           setAutomationsViewOpen(false);
+          setUsageViewOpen(false);
           setSidebarTab("sessions", session.cwd);
         }
 
@@ -7631,6 +7658,7 @@ function Workspace({
             setInboxViewOpen(false);
             setNotesViewOpen(false);
             setAutomationsViewOpen(false);
+            setUsageViewOpen(false);
             setSidebarTab("sessions", cwd);
           },
           submit: (id, text, attachments, options) =>
@@ -9492,6 +9520,7 @@ function Workspace({
       setInboxViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       onOpenApprovalSession(sessionId);
     },
     [onOpenApprovalSession],
@@ -9695,6 +9724,7 @@ function Workspace({
     setInboxViewOpen(false);
     setNotesViewOpen(false);
     setAutomationsViewOpen(false);
+    setUsageViewOpen(false);
     setFilePickerInitialQuery("");
     setFilePickerResetToken((token) => token + 1);
     setFilePickerOpen(true);
@@ -9704,6 +9734,7 @@ function Workspace({
     setInboxViewOpen(false);
     setNotesViewOpen(false);
     setAutomationsViewOpen(false);
+    setUsageViewOpen(false);
     setFilePickerInitialQuery(">");
     setFilePickerResetToken((token) => token + 1);
     setFilePickerOpen(true);
@@ -9720,6 +9751,7 @@ function Workspace({
     setInboxViewOpen(false);
     setNotesViewOpen(false);
     setAutomationsViewOpen(false);
+    setUsageViewOpen(false);
     setSidebarTab("files");
     setFilesSearchOpen(true);
     setSearchFocusToken((token) => token + 1);
@@ -9734,6 +9766,7 @@ function Workspace({
       setInboxViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       setSearchViewOpen(true);
       setSearchViewFocusToken((token) => token + 1);
     });
@@ -9752,6 +9785,7 @@ function Workspace({
       setSearchViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       setInboxViewOpen(true);
     });
   }, []);
@@ -9765,6 +9799,7 @@ function Workspace({
       setSearchViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       setInboxViewOpen(false);
       const cwd =
         sessionsRef.current.find((session) => session.id === sessionId)?.cwd ??
@@ -9868,6 +9903,7 @@ function Workspace({
       setSearchViewOpen(false);
       setInboxViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       setNotesViewOpen(true);
     });
   }, []);
@@ -9885,6 +9921,7 @@ function Workspace({
       setSearchViewOpen(false);
       setInboxViewOpen(false);
       setNotesViewOpen(false);
+      setUsageViewOpen(false);
       setAutomationsViewOpen(true);
     });
   }, []);
@@ -9893,12 +9930,31 @@ function Workspace({
     setAutomationsViewOpen(false);
   }, []);
 
+  const onOpenUsage = useCallback(() => {
+    workspaceNavigation.cancel();
+    startTransition(() => {
+      rememberAppView("usage");
+      setFilePickerOpen(false);
+      setSettingsOpen(false);
+      setSearchViewOpen(false);
+      setInboxViewOpen(false);
+      setNotesViewOpen(false);
+      setAutomationsViewOpen(false);
+      setUsageViewOpen(true);
+    });
+  }, []);
+
+  const onLeaveUsage = useCallback(() => {
+    setUsageViewOpen(false);
+  }, []);
+
   const onOpenAutomationSession = useCallback(
     async (sessionId: string) => {
       const session = await ensureOpenSession(sessionId);
       if (!session)
         throw new Error("This conversation is no longer available.");
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       setSearchViewOpen(false);
       setInboxViewOpen(false);
       setNotesViewOpen(false);
@@ -9921,6 +9977,7 @@ function Workspace({
           inbox: inboxViewOpenRef.current,
           notes: notesViewOpenRef.current,
           automations: automationsViewOpenRef.current,
+          usage: usageViewOpenRef.current,
         };
       }
       startTransition(() => {
@@ -9929,6 +9986,7 @@ function Workspace({
         setInboxViewOpen(false);
         setNotesViewOpen(false);
         setAutomationsViewOpen(false);
+        setUsageViewOpen(false);
         if (section) {
           setSettingsSection(section);
           saveSettingsSection(section);
@@ -9982,6 +10040,7 @@ function Workspace({
     setInboxViewOpen(returnView.inbox);
     setNotesViewOpen(returnView.notes && loadNotesEnabled());
     setAutomationsViewOpen(returnView.automations);
+    setUsageViewOpen(returnView.usage);
     setSettingsOpen(false);
   }, []);
 
@@ -10019,6 +10078,10 @@ function Workspace({
       setAutomationsViewOpen(false);
       return;
     }
+    if (usageViewOpen) {
+      setUsageViewOpen(false);
+      return;
+    }
     onVisitBack();
   }, [
     onCloseSettings,
@@ -10028,6 +10091,7 @@ function Workspace({
     inboxViewOpen,
     notesViewOpen,
     automationsViewOpen,
+    usageViewOpen,
   ]);
 
   const onRailForward = useCallback(() => {
@@ -10036,6 +10100,7 @@ function Workspace({
     setInboxViewOpen(false);
     setNotesViewOpen(false);
     setAutomationsViewOpen(false);
+    setUsageViewOpen(false);
     onVisitForward();
   }, [onVisitForward]);
 
@@ -10168,6 +10233,7 @@ function Workspace({
           inbox: onOpenInbox,
           notes: onOpenNotes,
           automations: onOpenAutomations,
+          usage: onOpenUsage,
         };
         open[view]();
         return;
@@ -10177,6 +10243,7 @@ function Workspace({
       setInboxViewOpen(false);
       setNotesViewOpen(false);
       setAutomationsViewOpen(false);
+      setUsageViewOpen(false);
       activateTab(id);
     },
     [
@@ -10185,6 +10252,7 @@ function Workspace({
       onOpenInbox,
       onOpenNotes,
       onOpenAutomations,
+      onOpenUsage,
     ],
   );
 
@@ -10216,6 +10284,7 @@ function Workspace({
       if (view === "inbox") setInboxViewOpen(false);
       if (view === "notes") setNotesViewOpen(false);
       if (view === "automations") setAutomationsViewOpen(false);
+      if (view === "usage") setUsageViewOpen(false);
       if (nextId) navigation.select?.(nextId);
     });
   }, []);
@@ -10453,6 +10522,7 @@ function Workspace({
       inbox: a.onOpenInbox,
       notes: a.onOpenNotes,
       automations: onOpenAutomations,
+      usage: onOpenUsage,
       settings: () => a.openSettings(),
       keybindings: () => a.openSettings("keybindings"),
       "toggle-sidebar": a.onToggleSidebar,
@@ -10569,6 +10639,7 @@ function Workspace({
             inboxViewOpenRef.current ||
             notesViewOpenRef.current ||
             automationsViewOpenRef.current ||
+            usageViewOpenRef.current ||
             settingsOpenRef.current ||
             filePickerOpenRef.current ||
             Boolean(whatsNewVersionRef.current);
@@ -10657,6 +10728,7 @@ function Workspace({
         !inboxViewOpenRef.current &&
         !notesViewOpenRef.current &&
         !automationsViewOpenRef.current &&
+        !usageViewOpenRef.current &&
         !(
           e.target instanceof Element &&
           e.target.closest("[data-session-drop], [data-agent-tab]")
@@ -11059,7 +11131,8 @@ function Workspace({
     settingsOpen ||
     inboxViewOpen ||
     notesViewOpen ||
-    automationsViewOpen;
+    automationsViewOpen ||
+    usageViewOpen;
   const compactProjectRail = collapsedProjectRailMode === "compact";
   const compactRailActive = compactProjectRail && !projectRailOpen;
   const compactTitleNavigation =
@@ -11279,7 +11352,8 @@ function Workspace({
         settingsOpen ||
         inboxViewOpen ||
         notesViewOpen ||
-        automationsViewOpen
+        automationsViewOpen ||
+        usageViewOpen
       }
       canGoForward={tabVisitNav.canForward}
       onGoBack={onRailBack}
@@ -11346,6 +11420,7 @@ function Workspace({
         project={usageSource?.cwd ?? projectCwd}
         onSelectAccount={onSelectProviderAccount}
         onManageAccounts={() => openSettings("providers", "provider-accounts")}
+        onViewAllUsage={onOpenUsage}
         terminals={runningTerminals}
         terminalOpen={runningTerminalOpen}
         onToggleTerminal={onToggleRunningTerminal}
@@ -11416,7 +11491,8 @@ function Workspace({
                       settingsOpen ||
                       inboxViewOpen ||
                       notesViewOpen ||
-                      automationsViewOpen
+                      automationsViewOpen ||
+                      usageViewOpen
                         ? "hidden"
                         : "flex min-h-0 min-w-0 flex-1 flex-col"
                     }
@@ -11425,7 +11501,8 @@ function Workspace({
                       settingsOpen ||
                       inboxViewOpen ||
                       notesViewOpen ||
-                      automationsViewOpen
+                      automationsViewOpen ||
+                      usageViewOpen
                     }
                     inert={
                       searchViewOpen ||
@@ -11433,6 +11510,7 @@ function Workspace({
                       inboxViewOpen ||
                       notesViewOpen ||
                       automationsViewOpen ||
+                      usageViewOpen ||
                       undefined
                     }
                   >
@@ -11620,6 +11698,7 @@ function Workspace({
                                 !inboxViewOpen &&
                                 !notesViewOpen &&
                                 !automationsViewOpen &&
+                                !usageViewOpen &&
                                 activeLinkedWorkItemPanel?.sessionId ===
                                   panel.sessionId
                               }
@@ -11747,6 +11826,24 @@ function Workspace({
                           launchAutomation(automation, run, true)
                         }
                         onOpenSession={onOpenAutomationSession}
+                      />
+                    </AppViewSurface>
+                  ) : null}
+                  {usageViewOpen ||
+                  (insetLayout && openAppViews.includes("usage")) ? (
+                    <AppViewSurface active={usageViewOpen}>
+                      <UsageView
+                        tabbed={insetLayout}
+                        active={usageViewOpen}
+                        besideRail={
+                          insetLayout || projectRailOpen || compactProjectRail
+                        }
+                        compactRail={!insetLayout && compactRailActive}
+                        onClose={onLeaveUsage}
+                        onToggleSidebar={onToggleSidebar}
+                        onManageAccounts={() =>
+                          openSettings("providers", "provider-accounts")
+                        }
                       />
                     </AppViewSurface>
                   ) : null}

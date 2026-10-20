@@ -81,6 +81,7 @@ export function UsageFooter({
   projectTerminalOpen = false,
   onSelectAccount,
   onManageAccounts,
+  onViewAllUsage,
   inset = false,
   pressureSlot,
 }: {
@@ -101,6 +102,8 @@ export function UsageFooter({
     accountId: string,
   ) => void;
   onManageAccounts?: (provider: ProviderAccountProvider) => void;
+  /** Offered in each usage popover, to open the Usage page. */
+  onViewAllUsage?: () => void;
   /** Sits on the inset layout's outer glass, below the card. */
   inset?: boolean;
   /** Receives the slot beside the terminal button for the pressure chip. */
@@ -148,6 +151,7 @@ export function UsageFooter({
         project={project}
         onSelectAccount={onSelectAccount}
         onManageAccounts={onManageAccounts}
+        onViewAllUsage={onViewAllUsage}
         variant={inset ? "inset" : "footer"}
         sessionChip={
           session ? (
@@ -216,6 +220,7 @@ export function UsageChips({
   project,
   onSelectAccount,
   onManageAccounts,
+  onViewAllUsage,
   accountPicker = true,
   sessionChip = null,
   variant = "footer",
@@ -229,6 +234,7 @@ export function UsageChips({
     accountId: string,
   ) => void;
   onManageAccounts?: (provider: ProviderAccountProvider) => void;
+  onViewAllUsage?: () => void;
   accountPicker?: boolean;
   /** Leads for a session whose agent has no usage chip of its own. */
   sessionChip?: ReactNode;
@@ -504,6 +510,7 @@ export function UsageChips({
         variant={variant}
         refreshKey={piRefreshKey}
         showRefresh={others.length === 0}
+        onViewAllUsage={onViewAllUsage}
       />
     ) : primary.length > 0 ? null : (
       sessionChip
@@ -518,6 +525,7 @@ export function UsageChips({
             now={now}
             variant={variant}
             compact={compact}
+            onViewAllUsage={onViewAllUsage}
             {...claudeAccountProps}
             onReconnect={reconnectClaude}
           />
@@ -531,6 +539,7 @@ export function UsageChips({
             project={project}
             variant={variant}
             compact={compact}
+            onViewAllUsage={onViewAllUsage}
             {...codexAccountProps}
             onConsumeReset={consumeCodexReset}
             onReconnect={reconnectCodex}
@@ -545,6 +554,7 @@ export function UsageChips({
             project={project}
             variant={variant}
             compact={compact}
+            onViewAllUsage={onViewAllUsage}
           />
         );
       case "devin":
@@ -557,6 +567,7 @@ export function UsageChips({
             project={project}
             variant={variant}
             compact={compact}
+            onViewAllUsage={onViewAllUsage}
             onReconnect={reconnectDevin}
           />
         );

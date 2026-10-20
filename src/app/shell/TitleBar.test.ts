@@ -23,7 +23,7 @@ function tab(overrides: Partial<Tab> = {}): Tab {
 }
 
 describe("tabCopy", () => {
-  it.each(["inbox", "search", "notes", "automations"] as const)(
+  it.each(["inbox", "search", "notes", "automations", "usage"] as const)(
     "uses a standalone label for the %s app tab",
     (appView) => {
       const label = appView[0].toUpperCase() + appView.slice(1);
