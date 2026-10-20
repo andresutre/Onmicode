@@ -370,6 +370,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords: "streaming pacing immediate latency performance animation",
   },
   {
+    id: "visual-replies",
+    section: "chat",
+    label: "Visual replies",
+    keywords: "html chart diagram mockup render sandbox iframe page",
+  },
+  {
     id: "follow-up",
     section: "chat",
     label: "Follow-up behavior",

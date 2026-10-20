@@ -53,6 +53,7 @@ mod tool_detail;
 mod trackpad_zoom;
 #[cfg(target_os = "windows")]
 mod tray;
+mod visuals;
 mod window;
 mod window_transfer;
 #[cfg(windows)]
@@ -267,6 +268,10 @@ pub fn run() {
                 .with_filter(window::is_workspace_window)
                 .build(),
         )
+        .register_uri_scheme_protocol(visuals::SCHEME, |ctx, request| {
+            visuals::serve(ctx.app_handle(), &request)
+        })
+        .manage(visuals::VisualPages::default())
         .manage(harness::HarnessHost::new())
         .manage(pty::PtyHost::new())
         .manage(remote::RemoteConnections::default())
@@ -390,6 +395,7 @@ pub fn run() {
             fs::git_github_pr_checks,
             fs::git_github_check_details,
             inbox_media::fetch_inbox_media,
+            visuals::visual_register,
             gitlab::gitlab_status,
             gitlab::gitlab_set_config,
             gitlab::gitlab_repo,

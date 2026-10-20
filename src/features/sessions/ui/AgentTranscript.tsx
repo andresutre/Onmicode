@@ -2051,6 +2051,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
         revealOnMount={revealOnMount}
         cwd={cwd}
         onOpenFile={onOpenFile}
+        visuals
       />
     </div>
   );
@@ -3666,7 +3667,12 @@ function ActivityNoteRow({
       </button>
       {open ? (
         <div className="min-w-0 pb-2">
-          <AgentMarkdown text={block.text} cwd={cwd} onOpenFile={onOpenFile} />
+          <AgentMarkdown
+            text={block.text}
+            cwd={cwd}
+            onOpenFile={onOpenFile}
+            visuals
+          />
         </div>
       ) : null}
     </div>

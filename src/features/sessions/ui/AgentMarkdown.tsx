@@ -75,7 +75,11 @@ import {
 import { parseStreamingMarkdown } from "./streamingMarkdown";
 import { HighlightedCodeBlock } from "./HighlightedCodeBlock";
 import { TranscriptPacing, TranscriptVisibility } from "./transcriptVisibility";
-import { usePacedReveal } from "../../settings/model/displayPrefs";
+import {
+  usePacedReveal,
+  useVisualReplies,
+} from "../../settings/model/displayPrefs";
+import { VisualBlock, visualFence } from "../../visuals";
 import {
   useStreamPresentation,
   type StreamMeasurement,
@@ -180,6 +184,8 @@ const FileOpenContext = createContext<{
 const RemoteMediaContext = createContext(false);
 /** Show local images and videos a reply links to, rather than the links. */
 const LocalMediaContext = createContext(false);
+/** Show an agent's marked HTML fences as visuals, rather than as code. */
+const VisualsContext = createContext(false);
 
 const REVEAL_LABEL = IS_MAC
   ? "Reveal in Finder"
@@ -353,6 +359,7 @@ function MarkdownCode({
   ...props
 }: MarkdownCodeProps) {
   const incomplete = useIsCodeFenceIncomplete();
+  const visuals = useContext(VisualsContext);
   const block = Object.prototype.hasOwnProperty.call(props, "data-block");
   if (!block) {
     const text = textContent(children);
@@ -408,6 +415,18 @@ function MarkdownCode({
       <MermaidBlock code={textContent(children)} incomplete={incomplete} />
     );
   }
+  const visual = visualFence(fence.language, meta);
+  if (visual && visuals) {
+    return (
+      <VisualBlock
+        html={textContent(children)}
+        title={visual.title}
+        incomplete={incomplete}
+      />
+    );
+  }
+  // Where visuals are off, a visual's page still reads as HTML.
+  if (visual) fence.language = "html";
   const iconName =
     fence.fileName ??
     (fence.language ? fileNameForLanguage(fence.language) : "");
@@ -642,6 +661,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   onOpenFile,
   allowRemoteMedia,
   localMedia,
+  visuals,
   hardBreaks,
   documentPath,
 }: {
@@ -656,6 +676,12 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   allowRemoteMedia?: boolean;
   /** Show local images and videos the text links to, in place of the links. */
   localMedia?: boolean;
+  /**
+   * Show the agent's visuals: HTML fences marked `onmicode-visual`, run in a
+   * sandboxed frame. Only for an agent's own replies, never for fetched or
+   * project content.
+   */
+  visuals?: boolean;
   /** Show a newline inside a block as a line break, as a document does (#591). */
   hardBreaks?: boolean;
   /**
@@ -692,6 +718,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({
     [cwd],
   );
   const remoteMedia = !!allowRemoteMedia;
+  const visualReplies = useVisualReplies();
   const visible = useContext(TranscriptVisibility);
   const pace = useContext(TranscriptPacing);
   const pacingEnabled = usePacedReveal();
@@ -804,46 +831,48 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   return (
     <RemoteMediaContext.Provider value={remoteMedia}>
       <LocalMediaContext.Provider value={!!localMedia}>
-        <FileOpenContext.Provider value={fileOpen}>
-          <>
-            {/* Streamdown takes no style; a contents box passes the fade timing down. */}
-            <div className="contents" style={fadeStyle}>
-              <MarkdownCommit.Provider value={blockCommitted}>
-                <Streamdown
-                  BlockComponent={DirectionalBlock}
-                  className={`agent-markdown min-w-0 font-sans text-sm leading-6 ${fading ? "word-fading" : ""} ${className ?? ""}`}
-                  components={MARKDOWN_COMPONENTS}
-                  controls={false}
-                  dir="auto"
-                  isAnimating={!!streaming || paced.revealing}
-                  parseIncompleteMarkdown={false}
-                  parseMarkdownIntoBlocksFn={parseBlocks}
-                  plugins={MARKDOWN_PLUGINS}
-                  remarkPlugins={remarkPlugins}
-                  rehypePlugins={rehypePlugins}
-                >
-                  {paced.text}
-                </Streamdown>
-              </MarkdownCommit.Provider>
-            </div>
-            {fileMenu ? (
-              <ExplorerMenu
-                x={fileMenu.x}
-                y={fileMenu.y}
-                items={fileLinkMenuItems(!!onOpenFile, !!cwd)}
-                ariaLabel="File link actions"
-                onPick={onFileMenuPick}
-                onClose={() => setFileMenu(null)}
-              />
-            ) : null}
-            {fileActionError ? (
-              <FileActionError
-                message={fileActionError}
-                onDismiss={() => setFileActionError(null)}
-              />
-            ) : null}
-          </>
-        </FileOpenContext.Provider>
+        <VisualsContext.Provider value={!!visuals && visualReplies}>
+          <FileOpenContext.Provider value={fileOpen}>
+            <>
+              {/* Streamdown takes no style; a contents box passes the fade timing down. */}
+              <div className="contents" style={fadeStyle}>
+                <MarkdownCommit.Provider value={blockCommitted}>
+                  <Streamdown
+                    BlockComponent={DirectionalBlock}
+                    className={`agent-markdown min-w-0 font-sans text-sm leading-6 ${fading ? "word-fading" : ""} ${className ?? ""}`}
+                    components={MARKDOWN_COMPONENTS}
+                    controls={false}
+                    dir="auto"
+                    isAnimating={!!streaming || paced.revealing}
+                    parseIncompleteMarkdown={false}
+                    parseMarkdownIntoBlocksFn={parseBlocks}
+                    plugins={MARKDOWN_PLUGINS}
+                    remarkPlugins={remarkPlugins}
+                    rehypePlugins={rehypePlugins}
+                  >
+                    {paced.text}
+                  </Streamdown>
+                </MarkdownCommit.Provider>
+              </div>
+              {fileMenu ? (
+                <ExplorerMenu
+                  x={fileMenu.x}
+                  y={fileMenu.y}
+                  items={fileLinkMenuItems(!!onOpenFile, !!cwd)}
+                  ariaLabel="File link actions"
+                  onPick={onFileMenuPick}
+                  onClose={() => setFileMenu(null)}
+                />
+              ) : null}
+              {fileActionError ? (
+                <FileActionError
+                  message={fileActionError}
+                  onDismiss={() => setFileActionError(null)}
+                />
+              ) : null}
+            </>
+          </FileOpenContext.Provider>
+        </VisualsContext.Provider>
       </LocalMediaContext.Provider>
     </RemoteMediaContext.Provider>
   );
