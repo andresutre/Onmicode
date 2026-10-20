@@ -14,10 +14,20 @@ export function isRateLimitProvider(
   return RATE_LIMIT_PROVIDERS.some((provider) => provider === harness);
 }
 
+/**
+ * A Pi model served by the pi-claude-code extension, which runs the Claude
+ * CLI: its usage, and its account, are Claude Code's.
+ */
+export function piUsesClaudeCode(model: string | undefined): boolean {
+  return Boolean(model?.startsWith("pi:claude-code/"));
+}
+
 /** The session's own provider, whose usage the footer always shows. */
 export function usageProvidersFor(
   harness: HarnessId | undefined,
+  model?: string,
 ): RateLimitProvider[] {
+  if (harness === "pi" && piUsesClaudeCode(model)) return ["claude"];
   return isRateLimitProvider(harness) ? [harness] : [];
 }
 
@@ -28,8 +38,10 @@ export function usageProvidersFor(
  */
 export function otherUsageProvidersFor(
   harness: HarnessId | undefined,
+  model?: string,
 ): RateLimitProvider[] {
-  return RATE_LIMIT_PROVIDERS.filter((provider) => provider !== harness);
+  const own = usageProvidersFor(harness, model);
+  return RATE_LIMIT_PROVIDERS.filter((provider) => !own.includes(provider));
 }
 
 /**
