@@ -14,11 +14,15 @@ import { generatePiSessionTitle } from "./piTitle";
 import { runPiTextPrompt, stopPiTextPrompt, warmupPiText } from "./piText";
 import { registerHarness, type HarnessAdapter } from "../../core/registry";
 import { discoverPiSkills } from "./piSkills";
+import { respondQuestion } from "./piFamily";
+import { PI_FLAVOR } from "./piFlavor";
 
 export const piAdapter: HarnessAdapter = {
   id: "pi",
   live: true,
   commands: { discover: ({ cwd }) => discoverPiSkills(cwd) },
+  respondQuestion: (sessionId, requestId, reply) =>
+    respondQuestion(PI_FLAVOR, sessionId, requestId, reply),
   sendTurn: sendPiTurn,
   compactContext: compactPiContext,
   rewindLastTurn: rewindPiLastTurn,

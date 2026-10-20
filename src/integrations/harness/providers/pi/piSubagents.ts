@@ -61,7 +61,8 @@ export function piSubagentEvents(
         : "in_progress";
     const name =
       stringField(entry, "description") ??
-      stringField(entry, "task") ??
+      readableTask(stringField(entry, "task")) ??
+      stringField(entry, "sessionName") ??
       stringField(entry, "agent") ??
       "Subagent";
     const agentType = stringField(entry, "agent");
@@ -193,6 +194,114 @@ export function piSubagentEvents(
       });
   });
   return events;
+}
+
+/** pi-subagents hides task text from hosts behind this placeholder. */
+function readableTask(task: string | undefined): string | undefined {
+  return task && !/^\[[a-z ]*redacted\]$/i.test(task.trim()) ? task : undefined;
+}
+
+/** One background run from pi-subagents' async status widget. */
+export type PiBackgroundRun = {
+  id: string;
+  label: string;
+  state: string;
+  model?: string;
+  currentTool?: string;
+  turnCount?: number;
+};
+
+const ASYNC_WIDGET_KEY = "subagent-async";
+const ASYNC_WIDGET_PREFIX = "PI_SUBAGENT_ASYNC_JSON:";
+const ACTIVE_RUN_STATES = new Set(["queued", "running", "paused"]);
+
+export function isActiveRunState(state: string): boolean {
+  return ACTIVE_RUN_STATES.has(state);
+}
+
+export function runRowStatus(state: string): string {
+  if (isActiveRunState(state)) return "in_progress";
+  return state === "complete" || state === "completed" ? "completed" : "failed";
+}
+
+/**
+ * pi-subagents reports its background runs through a `subagent-async` widget
+ * whose line is a JSON snapshot of every run in the session. Returns null for
+ * any other frame, and an empty list once the widget is cleared.
+ */
+export function piBackgroundRunsFromFrame(
+  rec: Record<string, unknown>,
+): PiBackgroundRun[] | null {
+  if (
+    rec.type !== "extension_ui_request" ||
+    rec.method !== "setWidget" ||
+    rec.widgetKey !== ASYNC_WIDGET_KEY
+  )
+    return null;
+  const line = Array.isArray(rec.widgetLines)
+    ? rec.widgetLines.find(
+        (item): item is string =>
+          typeof item === "string" && item.startsWith(ASYNC_WIDGET_PREFIX),
+      )
+    : undefined;
+  if (!line) return [];
+  let snapshot: Record<string, unknown> | null;
+  try {
+    snapshot = asRecord(JSON.parse(line.slice(ASYNC_WIDGET_PREFIX.length)));
+  } catch {
+    return null;
+  }
+  if (!snapshot || !Array.isArray(snapshot.runs)) return null;
+  return records(snapshot.runs).flatMap<PiBackgroundRun>((run) => {
+    const id = stringField(run, "id");
+    const state = stringField(run, "state");
+    if (!id || !state) return [];
+    const activity = asRecord(run.activity);
+    const currentTool = stringField(activity, "currentTool");
+    const turnCount = activity?.turnCount;
+    const model = stringField(run, "model");
+    return [
+      {
+        id,
+        label:
+          stringField(run, "label") ?? stringField(run, "agent") ?? "Subagent",
+        state,
+        ...(model ? { model } : {}),
+        ...(currentTool ? { currentTool } : {}),
+        ...(typeof turnCount === "number" ? { turnCount } : {}),
+      },
+    ];
+  });
+}
+
+/** The run id a detached `subagent` launch returned, if it detached. */
+export function piAsyncRunId(result: unknown): string | undefined {
+  return stringField(asRecord(asRecord(result)?.details), "asyncId");
+}
+
+export type PiSubagentNotice = {
+  runs: Array<{ runId: string; status?: string }>;
+  /** What the parent was told, without the instructions addressed to it. */
+  report: string;
+};
+
+/** pi-subagents' `subagent-notify` message: background runs that ended. */
+export function piSubagentNotice(
+  message: Record<string, unknown>,
+): PiSubagentNotice | null {
+  if (message.role !== "custom" || message.customType !== "subagent-notify")
+    return null;
+  const runs = records(asRecord(message.details)?.runs).flatMap((run) => {
+    const runId = stringField(run, "runId");
+    const status = stringField(run, "status");
+    return runId ? [{ runId, ...(status ? { status } : {}) }] : [];
+  });
+  const content =
+    typeof message.content === "string"
+      ? message.content
+      : textFromContent(message.content);
+  const report = content.split(/\n\nParent action:/)[0]?.trim() ?? "";
+  return { runs, report };
 }
 
 function records(value: unknown): Record<string, unknown>[] {

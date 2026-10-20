@@ -8,7 +8,10 @@ import {
 } from "../../core/child";
 import { PiRpc } from "./piClient";
 import { PI_FLAVOR, OMP_FLAVOR, type PiFlavor } from "./piFlavor";
-import { nativeCommandInvocation, type NativeCommand } from "../../core/nativeCommands";
+import {
+  nativeCommandInvocation,
+  type NativeCommand,
+} from "../../core/nativeCommands";
 import {
   asRecord,
   buildPiSpawnArgs,
@@ -24,6 +27,8 @@ export type PiSkillCommand = {
   description: string;
   invocation: string;
   source: "pi";
+  /** "extension" or "prompt"; skills leave it out. */
+  origin?: string;
 };
 
 export async function discoverPiSkills(cwd: string): Promise<PiSkillCommand[]> {
@@ -147,6 +152,26 @@ export function piSkillsFromRpcData(data: unknown): PiSkillCommand[] {
   for (const value of commands) {
     const command = asRecord(value);
     const invocation = command?.name;
+    // Extension commands (such as pi-subagents' /subagents-stop) and prompt
+    // templates run as typed, the same as in Pi's own editor.
+    if (
+      (command?.source === "extension" || command?.source === "prompt") &&
+      typeof invocation === "string" &&
+      invocation &&
+      !/[\s/\\]/.test(invocation) &&
+      !seen.has(invocation)
+    ) {
+      seen.add(invocation);
+      skills.push({
+        name: invocation,
+        description:
+          typeof command.description === "string" ? command.description : "",
+        invocation: nativeCommandInvocation("pi", invocation),
+        source: "pi",
+        origin: command.source,
+      });
+      continue;
+    }
     if (
       command?.source !== "skill" ||
       typeof invocation !== "string" ||
