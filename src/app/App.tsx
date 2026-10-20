@@ -617,6 +617,7 @@ import { AddRemoteProjectDialog } from "../features/connections/ui/AddRemoteProj
 import type { ConnectableInboxSource } from "../features/inbox/model/inboxFilters";
 import type { InboxSessionPortal } from "../features/inbox/ui/InboxDiscussionPanel";
 import { inboxAskKey, inboxAskPrompt } from "../features/inbox/model/inboxAsk";
+import { visualRepliesContext } from "../features/visuals/model/visualReplies";
 import {
   githubWorkItemThread,
   inboxComposerCard,
@@ -7236,6 +7237,10 @@ function Workspace({
               `<monocode_app>\nThe user's Operator command enables app access in this thread, including later turns without the command. You can start sessions, list and create project worktrees, choose a new session's checkout, read, continue, stop, archive or delete other project sessions, save unsent drafts, organize session folders, and read or write saved notes through its local CLI. Run \`${cli} --help\` when you need the exact commands and JSON fields. When reading another session, start with its latest two or three user/assistant exchanges. Request older exchanges with nextBefore or a larger excerpt only if needed. The CLI uses a session credential already in your environment; never print it. New sessions inherit this session's permission mode unless runtimeMode is set explicitly. For a new session with a draft, call sessions.start with its prompt and draft:true; do not submit a seed prompt. Sessions you start appear in the user's sidebar under this session without opening; the user opens them when they want. Only set placement right or down, or reveal:true, when the user asks to see a session open or side by side. The returned ID can be used as besideSessionId to split its pane again or moved into a folder immediately. A normal sessions.start submits its prompt but returns after acceptance, so do not wait for that agent to finish before organizing it.\n</monocode_app>`,
             );
           }
+          // A command owns its arguments, and a plan turn's reply becomes a plan.
+          const visuals =
+            rawCommand || intent === "plan" ? undefined : visualRepliesContext();
+          if (visuals) appContext.push(visuals);
           if (appContext.length) sendText += `\n\n${appContext.join("\n\n")}`;
           await sendTurn(sendText);
           acceptEditedResend();

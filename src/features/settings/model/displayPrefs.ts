@@ -74,6 +74,16 @@ export const loadPacedReveal = pacedReveal.load;
 export const savePacedReveal = pacedReveal.save;
 export const usePacedReveal = pacedReveal.useFlag;
 
+const visualReplies = flagStore(
+  "monocode.visualReplies",
+  true,
+  "monocode:visualreplieschange",
+);
+/** Agents are told about visuals, and replies show them rather than their code. */
+export const loadVisualReplies = visualReplies.load;
+export const saveVisualReplies = visualReplies.save;
+export const useVisualReplies = visualReplies.useFlag;
+
 const newLayoutPromptDismissed = flagStore(
   "monocode.newLayoutPromptDismissed",
   false,

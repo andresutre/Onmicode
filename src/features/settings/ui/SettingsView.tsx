@@ -260,6 +260,8 @@ import {
   saveComposerAutocorrect,
   savePacedReveal,
   usePacedReveal,
+  saveVisualReplies,
+  useVisualReplies,
   saveMaskEmails,
   saveNewLayoutPromptDismissed,
   saveShowRemainingUsage,
@@ -1037,6 +1039,7 @@ function GeneralPage({
 
 function ChatPage() {
   const pacedReveal = usePacedReveal();
+  const visualReplies = useVisualReplies();
   const [transcriptLayout, setTranscriptLayout] =
     useState<TranscriptLayout>(loadTranscriptLayout);
   const [transcriptAnchor, setTranscriptAnchor] =
@@ -1144,6 +1147,17 @@ function ChatPage() {
             label="Smooth text reveal"
             on={pacedReveal}
             onChange={savePacedReveal}
+          />
+        </Row>
+        <Row
+          id="visual-replies"
+          label="Visual replies"
+          description="Let agents answer with a chart, diagram or mockup, shown in the reply in a sandboxed frame with no network access. Off shows these as code and stops telling agents about them."
+        >
+          <Toggle
+            label="Visual replies"
+            on={visualReplies}
+            onChange={saveVisualReplies}
           />
         </Row>
       </Group>
