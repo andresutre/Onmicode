@@ -955,9 +955,7 @@ function noteBackgroundLaunch(
 ): void {
   const known = live.backgroundRuns.get(runId);
   const label =
-    piSubagentLaunchTitle(tool.input) ??
-    known?.label ??
-    "Background subagent";
+    piSubagentLaunchTitle(tool.input) ?? known?.label ?? "Background subagent";
   const dir = piAsyncRunDir(result);
   const run: BackgroundRun = {
     label,
@@ -1043,8 +1041,15 @@ async function readRunProgress(
       steps,
       messages,
     )) {
-      // The run's row status follows Pi's own reports, not the files.
-      if (event.type === "tool.updated" && event.callId === run.rowId) continue;
+      // The run's row status follows Pi's own reports, not the files. A batch
+      // still turns its launch row into the group row, so the launch isn't
+      // counted as one more subagent next to its children.
+      if (
+        event.type === "tool.updated" &&
+        event.callId === run.rowId &&
+        event.kind === "agent"
+      )
+        continue;
       live.onEvent(event);
     }
   } finally {

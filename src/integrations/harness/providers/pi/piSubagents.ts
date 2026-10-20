@@ -22,12 +22,20 @@ export function piSubagentEvents(
   if (!details) return [];
   const results = records(details.results);
   const progress = records(details.progress);
-  const entries = progress.length ? progress : results;
+  const inputTasks = records(
+    Array.isArray(input.tasks) ? input.tasks : asRecord(input.args)?.tasks,
+  );
+  const entries = progress.length
+    ? progress
+    : results.length
+      ? results
+      : workflowChildEntries(details, inputTasks);
   if (!entries.length) return [];
   const batch =
     entries.length > 1 ||
-    Array.isArray(input.tasks) ||
-    Array.isArray(input.chain);
+    inputTasks.length > 0 ||
+    Array.isArray(input.chain) ||
+    (input.workflow != null && input.workflow !== false);
   const events: HarnessEvent[] = [];
   if (batch) {
     events.push({
@@ -38,12 +46,17 @@ export function piSubagentEvents(
     });
   }
   entries.forEach((entry, index) => {
-    const key = entry.index ?? index;
+    // A workflow's children all report index 0; their workflow key tells
+    // them apart.
+    const key = stringField(entry, "workflowKey") ?? entry.index ?? index;
     const rowId = batch ? `${callId}:agent:${key}` : callId;
     const final = progress.length
       ? (results.find(
           (item) =>
-            (item.id === entry.id && item.id != null) || item.index === key,
+            (item.id === entry.id && item.id != null) ||
+            (item.workflowKey != null &&
+              item.workflowKey === entry.workflowKey) ||
+            item.index === key,
         ) ?? {})
       : entry;
     const failed =
@@ -196,6 +209,33 @@ export function piSubagentEvents(
       });
   });
   return events;
+}
+
+/**
+ * A running workflow lists its children only in `workflowChildren`, and only
+ * by key and state; the brief comes from the call's own tasks (`task-N` is
+ * the Nth task).
+ */
+function workflowChildEntries(
+  details: Record<string, unknown>,
+  inputTasks: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const children = records(asRecord(details.workflowChildren)?.children);
+  return children.map((child, index) => {
+    const key = stringField(child, "childId") ?? `task-${index + 1}`;
+    const number = /^task-(\d+)$/.exec(key)?.[1];
+    const task = inputTasks[number ? Number(number) - 1 : index] ?? {};
+    const agent = stringField(child, "agent") ?? stringField(task, "agent");
+    const sessionName = stringField(child, "sessionName");
+    const state = stringField(child, "state");
+    return {
+      ...task,
+      workflowKey: key,
+      ...(agent ? { agent } : {}),
+      ...(sessionName ? { sessionName } : {}),
+      ...(state ? { status: state } : {}),
+    };
+  });
 }
 
 /** One background run from pi-subagents' async status widget. */
