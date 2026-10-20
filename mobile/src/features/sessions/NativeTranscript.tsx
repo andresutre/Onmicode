@@ -24,7 +24,6 @@ import { withTiming } from "react-native-reanimated";
 
 import { useConnection } from "@/features/connection/ConnectionProvider";
 import { hasNativeTranscript } from "@/features/connection/nativeLink";
-import { pixelLayers } from "@/features/mascots/pixelMascots";
 import { useCollapsedToolCalls } from "@/features/settings/toolCalls";
 import {
   useNativeTranscript,
@@ -34,11 +33,9 @@ import type { TurnMetrics } from "@/features/workspace/types";
 import { useColors } from "@/ui/theme";
 import { usePushStarted } from "@/ui/usePushedIn";
 
-import { EmptySession } from "./EmptySession";
 import { FileOpener } from "./Markdown";
 import { SessionErrorSheet } from "./SessionErrorSheet";
 import { useJumpToEnd, useSessionLayout } from "./SessionScreen";
-import type { TranscriptAgent } from "./TranscriptTurn";
 import { TurnMetricsSheet } from "./TurnMetricsSheet";
 import { useReportSessionError, type SessionErrorNotice } from "./sessionError";
 
@@ -73,11 +70,9 @@ const NativeView = hasNativeTranscript
 /** React owns chrome and occasional interactions. Native owns all transcript data. */
 export function NativeTranscript({
   conversationId,
-  agent,
   pushed = false,
 }: {
   conversationId: string;
-  agent?: TranscriptAgent;
   pushed?: boolean;
 }) {
   const { pairing } = useConnection();
@@ -95,7 +90,6 @@ export function NativeTranscript({
   const [error, setError] = useState<SessionErrorNotice | null>(null);
   const [errorPresented, setErrorPresented] = useState(false);
   const [metrics, setMetrics] = useState<Action | null>(null);
-  const [empty, setEmpty] = useState(false);
   const configuration = useMemo(
     () =>
       pairing
@@ -123,18 +117,11 @@ export function NativeTranscript({
         fileLinks: !!openFile,
         error: colors.deletions,
         rail: colors.rail,
-        agent: agent?.name ?? "",
-        agentRects: agent
-          ? (() => {
-              const layers = pixelLayers(agent.mascot, agent.color);
-              return [...layers.body, ...layers.open];
-            })()
-          : [],
         scale: fontScale,
         pixelRatio,
         collapsed,
       }),
-    [colors, agent, openFile, fontScale, pixelRatio, collapsed],
+    [colors, openFile, fontScale, pixelRatio, collapsed],
   );
   const showError = useCallback((value: SessionErrorNotice) => {
     Keyboard.dismiss();
@@ -149,7 +136,6 @@ export function NativeTranscript({
           ? null
           : (nativeEvent.notice ?? null),
       );
-      setEmpty(!nativeEvent.hasTurns && !nativeEvent.error);
     },
     [onStatus],
   );
@@ -194,11 +180,6 @@ export function NativeTranscript({
   if (!NativeView || !pairing) return null;
   return (
     <View style={styles.fill}>
-      {agent && empty ? (
-        <View style={StyleSheet.absoluteFill}>
-          <EmptySession />
-        </View>
-      ) : null}
       <NativeView
         ref={view}
         style={styles.fill}

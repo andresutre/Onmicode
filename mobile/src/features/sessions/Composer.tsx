@@ -79,7 +79,7 @@ export function Composer({
   workspace,
   notice,
 }: {
-  /** Where this runs: the project, or the mono. */
+  /** Where this runs: the project. */
   context: string;
   branch: string;
   model: string;

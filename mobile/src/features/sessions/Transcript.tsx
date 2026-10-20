@@ -43,7 +43,6 @@ import type { SessionErrorNotice } from "./sessionError";
 import {
   TranscriptOpened,
   TranscriptTurn,
-  type TranscriptAgent,
 } from "./TranscriptTurn";
 
 const GAP = 4;
@@ -60,7 +59,6 @@ const NO_TURNS: Turn[] = [];
 /**
  * Chat transcript with ChatGPT-style anchoring: the latest user message sits
  * just under the header, with blank space below it for the reply to stream into.
- * A Mono's chat, as on desktop, skips the anchoring and sits at the bottom.
  *
  * Per the keyboard-controller chat guide, that space is `blankSpace`: the viewport
  * minus everything from the anchor message down. It is a minimum inset, so the
@@ -76,7 +74,6 @@ const NO_TURNS: Turn[] = [];
  */
 export function Transcript({
   turns: allTurns,
-  agent,
   hasOlder = false,
   loadOlder,
   pushed = false,
@@ -87,7 +84,6 @@ export function Transcript({
   busy?: boolean;
   /** On a screen pushed over another: wait for the push to start. */
   pushed?: boolean;
-  agent?: TranscriptAgent;
   /** Whether there are turns before the first one here to page in. */
   hasOlder?: boolean;
   loadOlder?: () => Promise<void>;
@@ -181,14 +177,12 @@ export function Transcript({
 
   const paddingTop = top;
   const paddingBottom = bottom;
-  const anchorIndex = agent
-    ? turns.length - 1
-    : turns.findLastIndex((turn) =>
-        turn.items.some((item) => item.type === "user"),
-      );
+  const anchorIndex = turns.findLastIndex((turn) =>
+    turn.items.some((item) => item.type === "user"),
+  );
   const anchorTurn = turns[anchorIndex];
   const anchorUser = anchorTurn?.items.findLast((item) => item.type === "user");
-  const anchorId = agent ? anchorTurn?.id : anchorUser?.id;
+  const anchorId = anchorUser?.id;
   const previousAnchor = useRef({ id: anchorId, user: anchorUser, top, bottom });
   const onContentInsetChange = useCallback((insets: { bottom: number }) => {
     contentInsetBottom.current = insets.bottom;
@@ -211,7 +205,7 @@ export function Transcript({
     anchorReady.current = false;
     if (anchoring.current === null && anchorIndex >= 0)
       anchoring.current = busy || !!anchorId?.startsWith("pending:");
-    const anchored = !agent && !!anchoring.current;
+    const anchored = !!anchoring.current;
     firstUserAnchor.current = anchored && anchorIndex === 0;
     if (viewportHeight.current === 0) return;
     if (anchorIndex < 0) {
@@ -283,7 +277,6 @@ export function Transcript({
     updateLayout.current = update;
     const previous = previousAnchor.current;
     const confirmedPending =
-      !agent &&
       previous.id?.startsWith("pending:") &&
       !anchorId?.startsWith("pending:") &&
       previous.user?.text === anchorUser?.text;
@@ -291,7 +284,7 @@ export function Transcript({
     if (anchorId && previous.id && anchorId !== previous.id && !confirmedPending) {
       pendingScroll.current = "animated";
       anchoring.current = true;
-    } else if (!agent && anchoring.current && anchorIndex === 0 && (
+    } else if (anchoring.current && anchorIndex === 0 && (
       confirmedPending || top !== previous.top || bottom !== previous.bottom
     )) pendingScroll.current = "instant";
     previousAnchor.current = { id: anchorId, user: anchorUser, top, bottom };
@@ -334,15 +327,6 @@ export function Transcript({
     jump.visible.set(withTiming(show ? 1 : 0, { duration: 160 }));
   };
 
-  // A Mono's chat follows its reply down while the reader is at the end.
-  const atEnd = useRef(true);
-  const follow = () => {
-    if (!agent || !atEnd.current || pendingScroll.current) return;
-    const scroll = list.current?.getNativeScrollRef() as
-      ScrollView | null | undefined;
-    scroll?.scrollToEnd({ animated: true });
-  };
-
   return (
     <TranscriptOpened value={opened}>
       {selectedError ? (
@@ -366,7 +350,6 @@ export function Transcript({
           }}
           contentContainerStyle={[
             styles.content,
-            agent && styles.bottomAligned,
             { paddingTop, paddingBottom },
           ]}
           showsVerticalScrollIndicator={false}
@@ -389,7 +372,6 @@ export function Transcript({
               layoutMeasurement,
             } = event.nativeEvent;
             const visibleEnd = contentOffset.y + layoutMeasurement.height;
-            atEnd.current = visibleEnd >= contentSize.height - 48;
             // The bottom inset holds the blank space under an anchored message.
             showJump(
               contentSize.height + (contentInset?.bottom ?? 0) - visibleEnd >
@@ -400,17 +382,16 @@ export function Transcript({
           onContentSizeChange={(_, height) => {
             contentHeight.current = height;
             update();
-            follow();
           }}
           renderItem={({ item, index }) => (
             <HeldRow
               turn={item}
               height={heights.current.get(item.id) ?? 0}
               motion={motion}
-              slack={!agent && index >= anchorIndex ? slack : null}
+              slack={index >= anchorIndex ? slack : null}
               onLayout={(event) => onRowLayout(item.id, event)}
             >
-              <TranscriptTurn turn={item} agent={agent} onError={showError} />
+              <TranscriptTurn turn={item} onError={showError} />
             </HeldRow>
           )}
         />
@@ -516,9 +497,5 @@ const styles = StyleSheet.create({
   },
   older: {
     paddingVertical: 12,
-  },
-  bottomAligned: {
-    flexGrow: 1,
-    justifyContent: "flex-end",
   },
 });
