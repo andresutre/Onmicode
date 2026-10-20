@@ -9,6 +9,7 @@ const transport = vi.hoisted(() => ({
   prompt: undefined as
     ((sessionId: string, command: Record<string, unknown>) => void) | undefined,
   writeChild: vi.fn(),
+  files: new Map<string, string>(),
 }));
 
 vi.mock("../../core/child", () => ({
@@ -21,6 +22,11 @@ vi.mock("../../core/child", () => ({
   watchChild: (id: string, onLine: (line: string) => void) =>
     transport.watchers.set(id, onLine),
   writeChild: transport.writeChild,
+  readHarnessTextFile: async (path: string) => {
+    const text = transport.files.get(path);
+    if (text == null) throw new Error(`No such file: ${path}`);
+    return text;
+  },
 }));
 
 import { cancelPiTurn, forgetPiSession, sendPiTurn, steerPiTurn } from "./pi";
@@ -31,6 +37,7 @@ import { newSession } from "../../../../features/sessions/model/session";
 import type { HarnessEvent, SendTurnInput } from "../../core/types";
 
 const RUN = "03f354c2-7ab3-4f7a-8b1f-3f9e5fb89dd3";
+const NL = String.fromCharCode(10);
 let events: HarnessEvent[] = [];
 
 function frame(value: Record<string, unknown>, sessionId = "pi-bg") {
@@ -102,7 +109,7 @@ function text(value: string) {
 }
 
 /** The first run: Pi detaches a scout and yields, as captured from Pi. */
-function detachAndYield() {
+function detachAndYield(details: Record<string, unknown> = {}) {
   frame({ type: "agent_start" });
   frame({
     type: "tool_execution_start",
@@ -119,7 +126,7 @@ function detachAndYield() {
     isError: false,
     result: {
       content: [{ type: "text", text: `Async: scout [${RUN}]\n\nDetached.` }],
-      details: { mode: "single", results: [], asyncId: RUN },
+      details: { mode: "single", results: [], asyncId: RUN, ...details },
     },
   });
   text("Launched scout in the background.");
@@ -153,6 +160,7 @@ async function start(turnInput = input()) {
 beforeEach(() => {
   events = [];
   transport.requests.length = 0;
+  transport.files.clear();
   transport.prompt = (_sessionId, command) =>
     respond(command, {
       disposition: String(command.message).startsWith("/subagents-")
@@ -211,6 +219,98 @@ describe("Pi background subagents", () => {
     expect(
       events.filter((event) => event.type === "background.updated").at(-1),
     ).toEqual({ type: "background.updated", tasks: [] });
+  });
+
+  it("shows what a background subagent is doing from its files", async () => {
+    const dir = "/tmp/runs/" + RUN;
+    const log = "/sessions/child/session.jsonl";
+    const status = (state: string) =>
+      JSON.stringify({
+        runId: RUN,
+        state,
+        steps: [
+          {
+            agent: "scout",
+            description: "[prompt redacted]",
+            sessionName: "scout: Reply PONG",
+            status: state === "running" ? "running" : "complete",
+            model: "claude-code/default",
+            sessionFile: log,
+          },
+        ],
+      });
+    const line = (message: Record<string, unknown>) =>
+      JSON.stringify({ type: "message", message });
+    transport.files.set(`${dir}/status.json`, status("running"));
+    transport.files.set(
+      log,
+      [
+        JSON.stringify({ type: "session", version: 3 }),
+        line({ role: "user", content: [{ type: "text", text: "Reply PONG" }] }),
+        line({
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "t1",
+              name: "bash",
+              arguments: { command: "echo PONG" },
+            },
+          ],
+        }),
+        '{"type":"message","mess',
+      ].join(NL),
+    );
+    const running = await start();
+    detachAndYield({ asyncDir: dir });
+    const steps = () =>
+      events
+        .reduce(applyHarnessEvent, newSession("pi", "/repo"))
+        .blocks.find((block) => block.tool?.callId === "call-1")?.agentRun
+        ?.steps;
+    await vi.waitFor(() =>
+      expect(steps()).toMatchObject([
+        { kind: "tool", text: expect.stringContaining("echo PONG") },
+      ]),
+    );
+    expect(steps()?.[0].status).toBe("in_progress");
+
+    transport.files.set(`${dir}/status.json`, status("complete"));
+    transport.files.set(
+      log,
+      transport.files.get(log)!.replace(
+        /[^\n]*$/,
+        [
+          line({
+            role: "toolResult",
+            toolCallId: "t1",
+            content: [{ type: "text", text: "PONG" }],
+            isError: false,
+          }),
+          line({
+            role: "assistant",
+            content: [{ type: "text", text: "PONG" }],
+          }),
+        ].join(NL),
+      ),
+    );
+    frame(asyncWidget("complete"));
+    completionNotice();
+    await vi.waitFor(() =>
+      expect(steps()).toMatchObject([
+        { kind: "tool", status: "completed" },
+        { kind: "message", text: "PONG" },
+      ]),
+    );
+    frame({ type: "agent_start" });
+    text("DONE");
+    frame({ type: "agent_settled" });
+    await running.turn;
+    const row = events
+      .reduce(applyHarnessEvent, newSession("pi", "/repo"))
+      .blocks.find((block) => block.tool?.callId === "call-1");
+    expect(row?.tool?.status).toBe("completed");
+    expect(row?.agentRun?.name).toBe("Reply PONG");
   });
 
   it("lets the turn go when a finished run never wakes Pi", async () => {

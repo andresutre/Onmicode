@@ -21,6 +21,7 @@ import { discoverOmpCommands, ompCommandsFromRpcData } from "./piSkills";
 import { OMP_FLAVOR } from "./piFlavor";
 import {
   killChild,
+  readHarnessTextFile,
   spawnChild,
   unwatchChild,
   watchChild,
@@ -30,8 +31,12 @@ import type { PiFlavor } from "./piFlavor";
 import { PiRpc } from "./piClient";
 import {
   isActiveRunState,
+  piAsyncRunDir,
   piAsyncRunId,
+  piBackgroundProgressEvents,
   piBackgroundRunsFromFrame,
+  piRunStatus,
+  piSessionMessages,
   piSubagentEvents,
   piSubagentNotice,
   runRowStatus,
@@ -172,7 +177,23 @@ type BackgroundRun = {
   rowId?: string;
   /** Seen in a status snapshot, so a later snapshot without it means ended. */
   reported: boolean;
+  /** Follows the run's files so its row shows what the subagent is doing. */
+  progress?: RunProgress;
 };
+
+type RunProgress = {
+  dir: string;
+  input: Record<string, unknown>;
+  timer: ReturnType<typeof setInterval> | null;
+  reading: boolean;
+  /** A last read was asked for while another read was going. */
+  finalOwed: boolean;
+  /** Each step's messages from its last read, by session file. */
+  messages: Map<string, Record<string, unknown>[]>;
+};
+
+/** How often a background run's files are read while it runs. */
+const PROGRESS_POLL_MS = 1_000;
 
 /**
  * How long a finished background run may take to wake Pi before the turn is
@@ -488,6 +509,7 @@ export async function stopSession(
       question.resolve({ kind: "skipped" });
     live.questions.clear();
     clearAwaitingWake(live);
+    stopAllRunProgress(live);
     live.activeTurn = false;
     live.turnDone?.();
     live.turnDone = null;
@@ -633,6 +655,7 @@ async function startLive(
         (current?.onEvent ?? input.onEvent)({ type: "session.ended", code });
       }
       if (current) {
+        stopAllRunProgress(current);
         for (const question of current.questions.values())
           question.resolve({ kind: "skipped" });
         for (const approval of current.approvals.values())
@@ -770,6 +793,7 @@ async function runTurn(
 async function stopBackgroundRuns(flavor: PiFlavor, live: Live): Promise<void> {
   if (flavor.id !== "pi") return;
   const ids = [...live.backgroundRuns.keys()];
+  stopAllRunProgress(live);
   live.waitingOnBackground = false;
   clearAwaitingWake(live);
   for (const id of ids) {
@@ -880,6 +904,7 @@ function finishBackgroundRun(
   }
   live.backgroundRuns.delete(runId);
   if (run.rowId) live.endedRunRows.set(runId, run.rowId);
+  stopRunProgress(live, run, true);
   backgroundRowStatus(live, run, runRowStatus(state), detail ? { detail } : {});
   if (
     live.waitingOnBackground &&
@@ -905,19 +930,122 @@ function noteBackgroundLaunch(
   live: Live,
   tool: InFlightTool,
   runId: string,
+  result: unknown,
 ): void {
   const known = live.backgroundRuns.get(runId);
   const label =
     piSubagentLaunchTitle(tool.input) ??
     known?.label ??
     "Background subagent";
+  const dir = piAsyncRunDir(result);
   const run: BackgroundRun = {
     label,
     rowId: tool.id,
     reported: known?.reported ?? false,
+    ...(known?.progress ? { progress: known.progress } : {}),
   };
   live.backgroundRuns.set(runId, run);
   backgroundRowStatus(live, run, "in_progress");
+  if (dir && !run.progress) {
+    run.progress = {
+      dir,
+      input: tool.input,
+      timer: null,
+      reading: false,
+      finalOwed: false,
+      messages: new Map(),
+    };
+    const progress = run.progress;
+    progress.timer = setInterval(
+      () => void readRunProgress(live, run, progress),
+      PROGRESS_POLL_MS,
+    );
+    void readRunProgress(live, run, progress);
+  }
+}
+
+/**
+ * pi-subagents keeps a background run's state in `status.json` and each
+ * subagent's conversation in its own session log. Neither reaches Pi's RPC
+ * stream, so they are read from disk and shown on the launching row.
+ */
+async function readRunProgress(
+  live: Live,
+  run: BackgroundRun,
+  progress: RunProgress,
+  final = false,
+): Promise<void> {
+  if (!run.rowId) return;
+  if (progress.reading) {
+    if (final) progress.finalOwed = true;
+    return;
+  }
+  progress.reading = true;
+  try {
+    const sep = progress.dir.includes("\\") ? "\\" : "/";
+    const status = await readHarnessTextFile(
+      `${progress.dir}${sep}status.json`,
+    ).catch(() => null);
+    const parsed = status ? piRunStatus(status) : null;
+    if (!parsed) return;
+    const { steps } = parsed;
+    // Pi's own notice normally ends the run first; this covers a lost one.
+    const ended = parsed.state != null && !isActiveRunState(parsed.state);
+    if (ended) {
+      if (progress.timer) clearInterval(progress.timer);
+      progress.timer = null;
+      final = true;
+    }
+    const messages = await Promise.all(
+      steps.map(async (step) => {
+        if (!step.sessionFile) return undefined;
+        const known = progress.messages.get(step.sessionFile);
+        const done =
+          step.entry.status === "complete" ||
+          step.entry.status === "completed" ||
+          step.entry.status === "failed";
+        // A finished step's log no longer changes once it has been read.
+        if (known && done && !final) return known;
+        const text = await readHarnessTextFile(step.sessionFile).catch(
+          () => null,
+        );
+        if (text == null) return known;
+        const read = piSessionMessages(text);
+        progress.messages.set(step.sessionFile, read);
+        return read;
+      }),
+    );
+    if (live.muteUpdates) return;
+    for (const event of piBackgroundProgressEvents(
+      run.rowId,
+      progress.input,
+      steps,
+      messages,
+    )) {
+      // The run's row status follows Pi's own reports, not the files.
+      if (event.type === "tool.updated" && event.callId === run.rowId) continue;
+      live.onEvent(event);
+    }
+  } finally {
+    progress.reading = false;
+  }
+  if (progress.finalOwed) {
+    progress.finalOwed = false;
+    await readRunProgress(live, run, progress, true);
+  }
+}
+
+function stopRunProgress(live: Live, run: BackgroundRun, readLast = false) {
+  const progress = run.progress;
+  if (!progress?.timer) return;
+  clearInterval(progress.timer);
+  progress.timer = null;
+  // The last messages may have landed after the previous read.
+  if (readLast) void readRunProgress(live, run, progress, true);
+}
+
+function stopAllRunProgress(live: Live): void {
+  for (const run of live.backgroundRuns.values()) stopRunProgress(live, run);
 }
 
 /** pi-subagents' status snapshot of the session's background runs. */
@@ -1299,7 +1427,7 @@ function handleFrame(
         ))
           live.onEvent(event);
         const runId = execEnd.isError ? undefined : piAsyncRunId(rec.result);
-        if (runId) noteBackgroundLaunch(live, tool, runId);
+        if (runId) noteBackgroundLaunch(live, tool, runId, rec.result);
       }
     }
   }

@@ -287,6 +287,94 @@ export function piBackgroundRunsFromFrame(
   return { runs, complete };
 }
 
+/** The folder where pi-subagents keeps a detached run's status files. */
+export function piAsyncRunDir(result: unknown): string | undefined {
+  return stringField(asRecord(asRecord(result)?.details), "asyncDir");
+}
+
+/** One step of a background run, from the run's `status.json`. */
+export type PiRunStep = {
+  entry: Record<string, unknown>;
+  /** The child's own Pi session log, where its messages are. */
+  sessionFile?: string;
+};
+
+/** A background run's `status.json`, or null if unreadable. */
+export function piRunStatus(
+  statusJson: string,
+): { state?: string; steps: PiRunStep[] } | null {
+  let status: Record<string, unknown> | null;
+  try {
+    status = asRecord(JSON.parse(statusJson));
+  } catch {
+    return null;
+  }
+  if (!status) return null;
+  const state = stringField(status, "state");
+  const steps = records(status.steps).map((entry, index) => {
+    const sessionFile = stringField(entry, "sessionFile");
+    return {
+      entry: { ...entry, index },
+      ...(sessionFile ? { sessionFile } : {}),
+    };
+  });
+  return { ...(state ? { state } : {}), steps };
+}
+
+/**
+ * The messages in a child's session log. The log is still being written, so
+ * a last line cut off mid-write is skipped.
+ */
+export function piSessionMessages(jsonl: string): Record<string, unknown>[] {
+  return jsonl.split("\n").flatMap((line) => {
+    if (!line.trim()) return [];
+    try {
+      const record = asRecord(JSON.parse(line));
+      const message = record?.type === "message" && asRecord(record.message);
+      return message ? [message] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * What a background run's subagents have done so far, as the same events a
+ * foreground run reports. `messages` lines up with `steps`.
+ */
+export function piBackgroundProgressEvents(
+  callId: string,
+  input: Record<string, unknown>,
+  steps: PiRunStep[],
+  messages: Array<Record<string, unknown>[] | undefined>,
+): HarnessEvent[] {
+  if (!steps.length) return [];
+  const results = steps.map(({ entry }, index) => {
+    const own = messages[index] ?? [];
+    // The status file's own tool tail repeats what the messages already show.
+    const { recentTools, recentOutput, currentTool, ...rest } = entry;
+    return {
+      ...(own.length ? rest : entry),
+      status: stepStatus(stringField(entry, "status")),
+      messages: own,
+    };
+  });
+  const running = results.some((step) => step.status === "running");
+  return piSubagentEvents(
+    callId,
+    input,
+    { details: { results, async: { state: running ? "running" : "done" } } },
+    !running,
+  );
+}
+
+function stepStatus(status: string | undefined): string {
+  if (status === "complete" || status === "completed") return "completed";
+  if (status === "failed" || status === "aborted" || status === "stopped")
+    return "failed";
+  return "running";
+}
+
 /** The run id a detached `subagent` launch returned, if it detached. */
 export function piAsyncRunId(result: unknown): string | undefined {
   return stringField(asRecord(asRecord(result)?.details), "asyncId");
