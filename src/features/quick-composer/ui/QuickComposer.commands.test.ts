@@ -204,22 +204,15 @@ function modePill() {
 it("lists every mode command and launches each in its mode", async () => {
   input("/");
   const listed = commands()!.textContent;
-  for (const name of ["Plan", "Operator", "Orchestrator", "Draft"])
+  for (const name of ["Plan", "Operator", "Draft"])
     expect(listed).toContain(name);
+  expect(listed).not.toContain("Orchestrator");
 
-  input("/orch");
+  input("/dra");
   await key("Enter");
-  expect(prompt.value).toBe("/orchestrator ");
+  expect(prompt.value).toBe("/draft ");
   // The command shows in the prompt only; the floating UI has no mode pill.
   expect(modePill()).toBeNull();
-  input("/orchestrator ship it");
-  await key("Enter");
-  expect(invoke).toHaveBeenLastCalledWith("quick_composer_submit", {
-    request: expect.objectContaining({
-      prompt: "ship it",
-      intent: "orchestrate",
-    }),
-  });
 
   input("/draft remember this");
   expect(container.textContent).toContain("Save draft");

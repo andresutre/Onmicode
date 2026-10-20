@@ -1,8 +1,5 @@
-import { monoReactionBlocks } from "../../monos/model/monoReaction";
-import { visibleUserPrompt } from "../../orchestration/model/orchestration";
 import { isEmojiOnlyMessage } from "../../sessions/model/emojiMessage";
 import { resolveModel } from "../../sessions/model/models";
-import { monoWorkStatus } from "../../sessions/model/monoWorkStatus";
 import {
   isOperatorUserTurn,
   operatorUserPrompt,
@@ -21,10 +18,7 @@ import {
   foldableWork,
   isNoticeBlock,
   isProseBlock,
-  monoTurnLatestStart,
-  monoTurnRuns,
   needsApproval,
-  opensNewStretch,
   toolCallLabel,
   toolCallState,
   isToolBlock,
@@ -55,14 +49,13 @@ export type MobileTurnItem =
       id: string;
       text: string;
       at?: number;
-      reaction?: string;
       emojiOnly?: boolean;
       attachments?: number;
       /** Another message follows straight on, so this one drops its time. */
       compact?: boolean;
     }
   | { type: "text"; id: string; text: string; streaming?: boolean }
-  /** The turn's status line: the fold line, or a Mono's signature. */
+  /** The turn's status line: the fold line. */
   | {
       type: "header";
       id: string;
@@ -83,15 +76,13 @@ export type MobileTurnItem =
 
 export type MobileTurn = {
   id: string;
-  /** A day stamp above the turn, for a Mono's conversation kept over days. */
-  stampAt?: number;
   items: MobileTurnItem[];
   /** When the answer landed, for the line under a settled turn. */
   completedAt?: number;
   footer?: boolean;
   /** What the footer's copy button copies: the turn's replies, as on desktop. */
   copyText?: string;
-  /** Token accounting for the footer's metrics button; Monos leave it out. */
+  /** Token accounting for the footer's metrics button. */
   metrics?: TurnMetrics;
   durationMs?: number;
 };
@@ -101,9 +92,7 @@ const MAX_STEPS = 40;
 
 type Options = {
   busy: boolean;
-  mono?: { name: string };
   pendingQuestion?: boolean;
-  backgroundTasks?: string[];
   /**
    * Which turns to build, as [start, end) over every turn's ID; the latest
    * MAX_TURNS without one. Grouping covers the whole session, but building a
@@ -116,15 +105,11 @@ export function mobileTranscript(
   session: Session,
   options: Options,
 ): MobileTurn[] {
-  const inlineWork = !!options.mono;
-  const blocks = inlineWork
-    ? monoReactionBlocks(session.blocks)
-    : session.blocks;
+  const blocks = session.blocks;
   const cache = new TranscriptTurnCache();
-  const turns = cache.group(blocks, false, inlineWork);
+  const turns = cache.group(blocks, false);
   const activeTurnIndex = turns.reduce(
-    (latest, turn, index) =>
-      turn[0].monoHabit || turn[0].role === "handoff" ? latest : index,
+    (latest, turn, index) => (turn[0].role === "handoff" ? latest : index),
     -1,
   );
   const model = resolveModel(session.harness, session.model).name;
@@ -139,63 +124,15 @@ export function mobileTranscript(
   ];
   return turns.slice(first, end).map((turn, offset) => {
     const index = first + offset;
-    const runs = inlineWork ? monoTurnRuns(turn) : [turn];
-    const userBlock = inlineWork
-      ? monoTurnUserBlock(runs[0])
-      : turnUserBlock(turn);
-    const lastRun =
-      runs.length > 1 ? monoTurnUserBlock(runs[runs.length - 1]) : userBlock;
-    const habit = turn[0].monoHabit;
-    const agentName = options.mono?.name;
-    const standaloneReply =
-      !userBlock && !!(agentName || habit) && turn.some(isProseBlock);
-    const durationMs =
-      runs.length > 1
-        ? sumDurations(runs.map((run) => monoTurnUserBlock(run)?.durationMs))
-        : userBlock?.durationMs;
-    const settled = !(
-      options.busy &&
-      !standaloneReply &&
-      index === activeTurnIndex
-    );
-    const items = cache.turnItems(turn, settled, { inlineWork });
-    const startedAt = userBlock?.startedAt ?? habit?.at ?? turn[0].startedAt;
-    const previous = turns[index - 1];
-    const previousAt = !previous
-      ? undefined
-      : inlineWork
-        ? monoTurnLatestStart(previous)
-        : (turnUserBlock(previous)?.startedAt ??
-          previous[0].monoHabit?.at ??
-          previous[0].startedAt);
-    const stampAt =
-      inlineWork && startedAt != null && opensNewStretch(startedAt, previousAt)
-        ? startedAt
-        : undefined;
+    const userBlock = turnUserBlock(turn);
+    const durationMs = userBlock?.durationMs;
+    const settled = !(options.busy && index === activeTurnIndex);
+    const items = cache.turnItems(turn, settled);
+    const startedAt = userBlock?.startedAt ?? turn[0].startedAt;
     const live = !settled;
-    const reactedOnly =
-      inlineWork &&
-      !live &&
-      items.every(
-        (item) => item.type === "block" && item.block.role === "user",
-      ) &&
-      items.some((item) => item.type === "block" && !!item.block.monoReaction);
-    const fold = inlineWork ? undefined : foldableWork(items);
-    const firstWork =
-      habit || standaloneReply
-        ? 0
-        : inlineWork
-          ? items.findIndex(
-              (item) => item.type !== "block" || item.block.role !== "user",
-            )
-          : firstFoldableIndex(items);
-    const showHeader =
-      !reactedOnly &&
-      (!!habit ||
-        standaloneReply ||
-        live ||
-        durationMs != null ||
-        (inlineWork ? firstWork >= 0 : !!fold));
+    const fold = foldableWork(items);
+    const showHeader = live || durationMs != null || !!fold;
+    const firstWork = firstFoldableIndex(items);
     const headerAt = fold
       ? fold.start
       : firstWork >= 0
@@ -210,8 +147,7 @@ export function mobileTranscript(
         startedAt,
         durationMs,
         harness: userBlock?.turnModel?.harness ?? session.harness,
-        model:
-          agentName ?? userBlock?.turnModel?.name ?? (live ? model : undefined),
+        model: userBlock?.turnModel?.name ?? (live ? model : undefined),
         entries: fold
           ? items
               .slice(fold.start, fold.end + 1)
@@ -233,23 +169,6 @@ export function mobileTranscript(
               )
           : [],
       };
-      if (habit || standaloneReply)
-        return { ...base, label: agentName ?? habit?.name };
-      if (inlineWork) {
-        if (!live) return { ...base, label: agentName };
-        const activity = turn.filter(
-          (block) => !block.internal && !block.draft,
-        );
-        let label = monoWorkStatus(activity, true).label;
-        if (options.pendingQuestion && !activity.some(needsApproval))
-          label = "Waiting for answers…";
-        else if (options.backgroundTasks?.length)
-          label =
-            options.backgroundTasks.length === 1
-              ? "Waiting for background task…"
-              : `Waiting for ${options.backgroundTasks.length} background tasks…`;
-        return { ...base, label };
-      }
       if (live) return { ...base, waiting };
       if (durationMs != null) return base;
       return {
@@ -271,16 +190,6 @@ export function mobileTranscript(
       if (showHeader && itemIndex === headerAt) out.push(header());
       if (fold && itemIndex >= fold.start && itemIndex <= fold.end) return;
       if (item.type !== "block") {
-        // A Mono's process lives in its status line; only what needs you shows.
-        if (inlineWork) {
-          for (const block of item.blocks.filter(needsApproval))
-            out.push({
-              type: "notice",
-              id: block.id,
-              text: `Waiting for approval on desktop: ${toolCallLabel(block, session.cwd)}`,
-            });
-          return;
-        }
         const active = live && itemIndex === items.length - 1;
         out.push({
           type: "work",
@@ -300,34 +209,19 @@ export function mobileTranscript(
         entry.compact = true;
     });
 
-    const footer =
-      settled &&
-      !reactedOnly &&
-      (durationMs != null || standaloneReply || (inlineWork && firstWork >= 0));
+    const footer = settled && durationMs != null;
     const completedAt =
-      habit?.at ??
-      (runs.length > 1 && lastRun?.startedAt != null
-        ? lastRun.startedAt + (lastRun.durationMs ?? 0)
-        : startedAt != null
-          ? startedAt + (durationMs ?? 0)
-          : undefined);
+      startedAt != null ? startedAt + (durationMs ?? 0) : undefined;
     return {
       id: turn[0].id,
-      ...(stampAt != null ? { stampAt } : {}),
       items: out,
       ...(footer
         ? {
             footer: true,
             completedAt,
-            copyText: turnCopyText(
-              inlineWork
-                ? items.flatMap((item) =>
-                    item.type === "block" ? [item.block] : [],
-                  )
-                : turn,
-            ),
+            copyText: turnCopyText(turn),
             ...(durationMs != null ? { durationMs } : {}),
-            ...(!inlineWork && userBlock?.turnMetrics
+            ...(userBlock?.turnMetrics
               ? { metrics: userBlock.turnMetrics }
               : {}),
           }
@@ -338,16 +232,15 @@ export function mobileTranscript(
 
 function blockItem(block: Block, cwd: string): MobileTurnItem | null {
   if (block.role === "user") {
-    const text = visibleUserPrompt(
-      isOperatorUserTurn(block) ? operatorUserPrompt(block) : block.text,
-    );
+    const text = (
+      isOperatorUserTurn(block) ? operatorUserPrompt(block) : block.text
+    ).trimEnd();
     if (!text && !block.attachments?.length) return null;
     return {
       type: "user",
       id: block.id,
       text,
       at: block.sentAt ?? block.startedAt,
-      ...(block.monoReaction ? { reaction: block.monoReaction } : {}),
       ...(text && isEmojiOnlyMessage(text) ? { emojiOnly: true } : {}),
       ...(block.attachments?.length
         ? { attachments: block.attachments.length }
@@ -361,7 +254,7 @@ function blockItem(block: Block, cwd: string): MobileTurnItem | null {
       text: block.text,
       ...(block.streaming ? { streaming: true } : {}),
     };
-  if (block.role === "plan" && !block.orchestration && block.text.trim())
+  if (block.role === "plan" && block.text.trim())
     return { type: "text", id: block.id, text: block.text };
   if (block.role === "tasks" && block.taskList?.items.length)
     return {
@@ -435,21 +328,4 @@ function turnUserBlock(blocks: Block[]): Block | undefined {
   return [...blocks]
     .reverse()
     .find((block) => block.role === "user" && !block.internal);
-}
-
-/** As AgentTranscript: the run's latest started prompt, hidden ones included. */
-function monoTurnUserBlock(blocks: Block[]): Block | undefined {
-  return (
-    [...blocks]
-      .reverse()
-      .find((block) => block.role === "user" && block.startedAt != null) ??
-    blocks.find((block) => block.role === "user")
-  );
-}
-
-function sumDurations(durations: (number | undefined)[]): number | undefined {
-  const known = durations.filter((value): value is number => value != null);
-  return known.length
-    ? known.reduce((sum, value) => sum + value, 0)
-    : undefined;
 }

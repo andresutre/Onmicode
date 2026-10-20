@@ -3,13 +3,11 @@ import {
   CircleDashed,
   CursorMagicSelection,
   MessageSquare,
-  Share,
   X,
 } from "../../../shared/ui/icons";
 import { BTW_COMMAND } from "../model/btw";
 import { DRAFT_COMMAND } from "../model/draftCommand";
 import { OPERATOR_COMMAND } from "../model/operatorCommand";
-import { ORCHESTRATOR_COMMAND } from "../model/orchestratorCommand";
 import { PLAN_COMMAND } from "../model/plan";
 
 type ModeCommandStyle = {
@@ -51,21 +49,6 @@ export const MODE_COMMAND_STYLES: Record<string, ModeCommandStyle> = {
       label: "Operator",
       description: "Give this thread access to MonoCode",
       iconClassName: "text-sky-300/80",
-    },
-  },
-  [ORCHESTRATOR_COMMAND.name]: {
-    Icon: Share,
-    className: "text-fuchsia-700 dark:text-fuchsia-200/90",
-    pill: {
-      label: "Orchestrator",
-      title: "Orchestrator mode",
-      className:
-        "bg-fuchsia-500/15 font-medium text-fuchsia-700 hover:bg-fuchsia-500/20 dark:bg-fuchsia-400/10 dark:text-fuchsia-200/90 dark:hover:bg-fuchsia-400/15",
-    },
-    menu: {
-      label: "Orchestrator",
-      description: "Plan and coordinate agent work",
-      iconClassName: "text-fuchsia-300/65",
     },
   },
   [DRAFT_COMMAND.name]: {

@@ -8,11 +8,8 @@ import {
 } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { OrchestrationRun } from "../../features/orchestration/model/orchestration";
-import { prepareOrchestrationWorkerDetails } from "../../features/orchestration/model/orchestrationWorkspace";
 import {
   flushSessionWrites,
-  getSession,
   upsertSession,
   type SessionRecord,
 } from "../../features/sessions/data/sessionStore";
@@ -27,10 +24,6 @@ import {
   type WorkspaceTab,
 } from "../../features/workspace/model/layout";
 import { useIdleSessionDetach } from "./useIdleSessionDetach";
-import {
-  createMono,
-  saveMonoSessionId,
-} from "../../features/monos/model/mono";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -96,25 +89,9 @@ function chat(id: string, patch: Partial<Session> = {}): Session {
   };
 }
 
-function run(status: OrchestrationRun["status"]): OrchestrationRun {
-  return {
-    version: 1,
-    leadId: "lead",
-    cwd: "/repo",
-    status,
-    allowedHarnesses: ["claude"],
-    maxWorkers: 1,
-    cli: "monocode",
-    tasks: [],
-    continuations: 0,
-    requests: {},
-  };
-}
-
 type WorkspaceState = {
   sessions: Session[];
   tabs: WorkspaceTab[];
-  orchestrationRuns: OrchestrationRun[];
   busySessionIds: ReadonlySet<string>;
   activeSessionId: string;
   liveAgentsEnabled: boolean;
@@ -122,19 +99,9 @@ type WorkspaceState = {
 
 function mountWorkspace(initial: Partial<WorkspaceState> = {}) {
   let props: WorkspaceState = {
-    sessions: [
-      chat("lead", { busy: true }),
-      chat("worker", {
-        busy: true,
-        orchestrationLeadId: "lead",
-        providerSessionId: "worker-thread",
-        worktreeCwd: "/repo-workers/worker",
-      }),
-      chat("other"),
-    ],
+    sessions: [chat("lead", { busy: true }), chat("other")],
     tabs: [newTab("lead"), newTab("other")],
-    orchestrationRuns: [run("active")],
-    busySessionIds: new Set(["lead", "worker"]),
+    busySessionIds: new Set(["lead"]),
     activeSessionId: "other",
     liveAgentsEnabled: true,
     ...initial,
@@ -189,14 +156,13 @@ function mountWorkspace(initial: Partial<WorkspaceState> = {}) {
   return {
     snapshot: () => snapshot,
     update,
-    finish: (status: OrchestrationRun["status"] = "finished") =>
+    finish: () =>
       update({
         sessions: snapshot.sessions.map((session) => ({
           ...session,
           busy: false,
         })),
         busySessionIds: new Set(),
-        orchestrationRuns: [run(status)],
       }),
     persistSession,
     openingSessionIds: openingSessionIds.current,
@@ -212,146 +178,11 @@ async function advance(milliseconds = 250) {
   await flushSessionWrites();
 }
 
-it("keeps the resident conversation mounted independently of ordinary tabs", async () => {
-  const agent = chat("resident");
-  const values = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => values.set(key, value),
-  });
-  saveMonoSessionId(createMono([agent.cwd]).id, agent.id);
-  const workspace = mountWorkspace({
-    sessions: [agent, chat("other")],
-    tabs: [newTab("other")],
-    orchestrationRuns: [],
-    liveAgentsEnabled: false,
-    busySessionIds: new Set(),
-    activeSessionId: "other",
-  });
-  await advance();
-  expect(workspace.snapshot().sessions.map((session) => session.id)).toEqual([
-    "resident",
-    "other",
-  ]);
-  expect(workspace.persistSession).not.toHaveBeenCalled();
-  expect(mocks.forgetHarnessSession).not.toHaveBeenCalled();
-});
-
-describe("orchestration worker detachment", () => {
-  it("retains finished workers until their lead closes, then persists and forgets them", async () => {
-    const workspace = mountWorkspace();
-    await advance();
-    workspace.finish();
-    await advance();
-    expect(
-      workspace.snapshot().sessions.map((session) => session.id),
-    ).toContain("worker");
-    expect(workspace.persistSession).not.toHaveBeenCalled();
-    expect(mocks.forgetHarnessSession).not.toHaveBeenCalled();
-
-    workspace.update({ tabs: [newTab("other")] });
-    await advance(249);
-    expect(mocks.forgetHarnessSession).not.toHaveBeenCalled();
-    await advance(1);
-
-    expect(workspace.snapshot().sessions.map((session) => session.id)).toEqual([
-      "lead",
-      "other",
-    ]);
-    expect(workspace.snapshot().unseenFinishedIds).toEqual(new Set(["lead"]));
-    expect(
-      liveAgentsFromSessions(
-        workspace.snapshot().sessions,
-        workspace.snapshot().unseenFinishedIds,
-      ),
-    ).toMatchObject([{ id: "lead", done: true }]);
-    expect(workspace.persistSession).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ id: "worker", busy: false }),
-    );
-    expect(mocks.forgetHarnessSession).toHaveBeenCalledExactlyOnceWith(
-      "claude",
-      "worker",
-    );
-    expect(stored.get("worker")?.blocks.at(-1)?.text).toBe(
-      "The assignment is complete.",
-    );
-  });
-
-  it.each(["active", "paused"] as const)(
-    "keeps idle workers of a closed lead attached while the run is %s",
-    async (status) => {
-      const workspace = mountWorkspace();
-      workspace.finish(status);
-      workspace.update({ tabs: [newTab("other")] });
-      await advance();
-      expect(
-        workspace.snapshot().sessions.map((session) => session.id),
-      ).toContain("worker");
-      expect(workspace.persistSession).not.toHaveBeenCalled();
-      expect(mocks.forgetHarnessSession).not.toHaveBeenCalled();
-
-      workspace.update({ orchestrationRuns: [run("finished")] });
-      await advance();
-      expect(
-        workspace.snapshot().sessions.map((session) => session.id),
-      ).not.toContain("worker");
-      expect(mocks.forgetHarnessSession).toHaveBeenCalledExactlyOnceWith(
-        "claude",
-        "worker",
-      );
-    },
-  );
-
-  it.each(["finished", "stopped"] as const)(
-    "uses the latest %s run and closed tabs when a detach timer is already pending",
-    async (status) => {
-      const workspace = mountWorkspace();
-      await advance(100);
-      workspace.finish(status);
-      workspace.update({ tabs: [newTab("other")] });
-      await advance(150);
-      expect(
-        workspace.snapshot().sessions.map((session) => session.id),
-      ).not.toContain("worker");
-      expect(mocks.forgetHarnessSession).toHaveBeenCalledExactlyOnceWith(
-        "claude",
-        "worker",
-      );
-    },
-  );
-
-  it.each(["busy", "opening", "transferring"] as const)(
-    "does not detach a %s worker even after the run finishes",
-    async (reason) => {
-      const workspace = mountWorkspace({
-        sessions: [
-          chat("worker", {
-            orchestrationLeadId: "lead",
-            busy: reason === "busy",
-          }),
-          chat("other"),
-        ],
-        tabs: [newTab("other")],
-        orchestrationRuns: [run("finished")],
-        busySessionIds: new Set(reason === "busy" ? ["lead", "worker"] : []),
-      });
-      if (reason === "opening") workspace.openingSessionIds.add("worker");
-      if (reason === "transferring")
-        workspace.skipForgetSessionIds.add("worker");
-      await advance();
-      expect(
-        workspace.snapshot().sessions.map((session) => session.id),
-      ).toContain("worker");
-      expect(workspace.persistSession).not.toHaveBeenCalled();
-      expect(mocks.forgetHarnessSession).not.toHaveBeenCalled();
-    },
-  );
-
+describe("idle session detachment", () => {
   it("keeps ordinary unseen finished chats until they are focused", async () => {
     const workspace = mountWorkspace({
       sessions: [chat("ordinary", { busy: true }), chat("other")],
       tabs: [newTab("other")],
-      orchestrationRuns: [],
       busySessionIds: new Set(["ordinary"]),
     });
     workspace.finish();
@@ -386,7 +217,6 @@ describe("orchestration worker detachment", () => {
     const workspace = mountWorkspace({
       sessions: [chat("ordinary", { busy: true }), chat("other")],
       tabs: [newTab("other")],
-      orchestrationRuns: [],
       busySessionIds: new Set(["ordinary"]),
     });
     workspace.finish();
@@ -406,7 +236,6 @@ describe("orchestration worker detachment", () => {
     const workspace = mountWorkspace({
       sessions: [chat("inbox", { inboxAsk: true, busy: true }), chat("other")],
       tabs: [newTab("other")],
-      orchestrationRuns: [],
       busySessionIds: new Set(["inbox"]),
     });
     workspace.finish();
@@ -416,69 +245,6 @@ describe("orchestration worker detachment", () => {
       workspace.snapshot().sessions.map((session) => session.id),
     ).toContain("inbox");
     expect(workspace.persistSession).not.toHaveBeenCalled();
-    expect(mocks.forgetHarnessSession).not.toHaveBeenCalled();
-  });
-
-  it("reloads a detached worker's transcript from storage after the cache is evicted", async () => {
-    const workspace = mountWorkspace();
-    workspace.finish();
-    workspace.update({ activeSessionId: "lead" });
-    const finishedWorker = workspace
-      .snapshot()
-      .sessions.find((session) => session.id === "worker")!;
-    workspace.update({ tabs: [newTab("other")], activeSessionId: "other" });
-    await advance();
-    expect(workspace.snapshot().sessions.map((session) => session.id)).toEqual([
-      "other",
-    ]);
-    expect(mocks.forgetHarnessSession).toHaveBeenCalledWith("claude", "worker");
-    workspace.cache.clear();
-
-    const details = await prepareOrchestrationWorkerDetails(
-      [{ leadId: "lead", sessionId: "worker" }],
-      {
-        openLead: async (id) => {
-          const lead = await getSession(id);
-          expect(lead).not.toBeNull();
-          workspace.update({
-            sessions: [...workspace.snapshot().sessions, lead!],
-            tabs: [newTab("other"), newTab(id)],
-            activeSessionId: id,
-          });
-        },
-        openWorker: async (id) => {
-          const worker = await getSession(id);
-          if (worker)
-            workspace.update({
-              sessions: [...workspace.snapshot().sessions, worker],
-            });
-          return worker;
-        },
-        hasSession: (id) =>
-          workspace.snapshot().sessions.some((session) => session.id === id),
-      },
-    );
-    expect(details).toEqual({
-      leadId: "lead",
-      workers: [{ leadId: "lead", sessionId: "worker" }],
-    });
-    expect(mocks.invoke).toHaveBeenCalledWith("session_get", {
-      sessionId: "worker",
-    });
-    expect(
-      workspace.snapshot().sessions.find((session) => session.id === "worker"),
-    ).toMatchObject({
-      busy: false,
-      orchestrationLeadId: "lead",
-      providerSessionId: finishedWorker.providerSessionId,
-      worktreeCwd: finishedWorker.worktreeCwd,
-      blocks: finishedWorker.blocks,
-    });
-    mocks.forgetHarnessSession.mockClear();
-    await advance();
-    expect(
-      workspace.snapshot().sessions.map((session) => session.id),
-    ).toContain("worker");
     expect(mocks.forgetHarnessSession).not.toHaveBeenCalled();
   });
 

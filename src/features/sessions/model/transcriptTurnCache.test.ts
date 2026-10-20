@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Block } from "./session";
-import { groupMonoChatTurns, groupTurns } from "./transcriptActivity";
+import { groupTurns } from "./transcriptActivity";
 import { TranscriptTurnCache } from "./transcriptTurnCache";
 
 function conversation(): Block[] {
@@ -90,150 +90,13 @@ describe("transcript turn cache", () => {
     expect(cache.group(blocks)).toBe(before);
     expect(cache.group(blocks.slice())).toBe(before);
   });
-
-  it("caches Mono follow-ups together and updates when inline work changes", () => {
-    const cache = new TranscriptTurnCache();
-    const blocks: Block[] = [
-      { id: "u", role: "user", text: "Inspect this" },
-      { id: "a", role: "assistant", text: "Checking" },
-      { id: "follow-up", role: "user", text: "And this", sentAt: 10 },
-      { id: "reply", role: "assistant", text: "Done" },
-    ];
-    expect(cache.group(blocks)).toHaveLength(2);
-    const monoTurns = cache.group(blocks, false, true);
-    expect(monoTurns).toHaveLength(1);
-    expect(monoTurns[0]).toEqual(blocks);
-    const items = cache.turnItems(monoTurns[0], true, { inlineWork: true });
-    expect(cache.group(blocks.slice(), false, true)).toBe(monoTurns);
-    expect(cache.turnItems(monoTurns[0], true, { inlineWork: true })).toBe(
-      items,
-    );
-    expect(cache.group(blocks)).toHaveLength(2);
-  });
-
-  it("keeps cached Mono narration distinct from ordinary and settled work", () => {
-    const cache = new TranscriptTurnCache();
-    const turn: Block[] = [
-      { id: "u", role: "user", text: "Inspect this" },
-      { id: "opening", role: "assistant", text: "Checking" },
-      {
-        id: "tool",
-        role: "tool",
-        text: "Inspect files",
-        tool: { kind: "shell", status: "completed" },
-      },
-      { id: "reply", role: "assistant", text: "Done" },
-    ];
-    const live = cache.turnItems(turn, false, { inlineWork: true });
-    expect(live[1]).toEqual({ type: "activity", blocks: turn.slice(1) });
-    const settled = cache.turnItems(turn, true, { inlineWork: true });
-    expect(settled[2]).toEqual({ type: "block", block: turn[3] });
-    const ordinary = cache.turnItems(turn, false);
-    expect(ordinary[3]).toEqual({ type: "block", block: turn[3] });
-    expect(cache.turnItems(turn, false, { inlineWork: true })).toBe(live);
-    expect(cache.turnItems(turn, true, { inlineWork: true })).toBe(settled);
-  });
-
-  it("refreshes reply visibility when a queued follow-up is delivered without changing blocks", () => {
-    const cache = new TranscriptTurnCache();
-    const turn: Block[] = [
-      { id: "user", role: "user", text: "Review" },
-      { id: "intro", role: "assistant", text: "Checking." },
-      { id: "follow-up", role: "user", text: "Status?", sentAt: 10 },
-      { id: "reply", role: "assistant", text: "Checking browser security." },
-    ];
-    const pending = cache.turnItems(turn, false, {
-      inlineWork: true,
-      undeliveredMessageIds: new Set(["follow-up"]),
-    });
-    expect(pending).not.toContainEqual({ type: "block", block: turn[3] });
-    const delivered = cache.turnItems(turn, false, { inlineWork: true });
-    expect(delivered).toContainEqual({ type: "block", block: turn[3] });
-    expect(cache.turnItems(turn, false, { inlineWork: true })).toBe(delivered);
-    expect(delivered).not.toBe(pending);
-  });
-
-  it("retains hidden completion prompts for identity while respecting managed visibility", () => {
-    const cache = new TranscriptTurnCache();
-    const blocks: Block[] = [
-      { id: "u", role: "user", text: "Inspect this", startedAt: 0 },
-      { id: "a", role: "assistant", text: "Checking" },
-      {
-        id: "completion",
-        role: "user",
-        text: "Private completion prompt",
-        internal: true,
-        appRequestId: "mono-completion-result",
-        // A day later, so the reply opens a turn of its own.
-        startedAt: 24 * 60 * 60 * 1000,
-      },
-      { id: "reply", role: "assistant", text: "Done" },
-    ];
-    const turns = cache.group(blocks, false, true);
-    expect(turns[1][0]).toBe(blocks[2]);
-    const visible = cache.turnItems(turns[1], true, { inlineWork: true });
-    expect(visible).toEqual([{ type: "block", block: blocks[3] }]);
-    const managed = cache.turnItems(turns[1], true, {
-      managed: true,
-      inlineWork: true,
-    });
-    expect(managed[0]).toEqual({ type: "block", block: blocks[2] });
-    expect(cache.turnItems(turns[1], true, { inlineWork: true })).toBe(visible);
-  });
-  it("keeps each merged Mono run's answer when a later run did more work", () => {
-    const cache = new TranscriptTurnCache();
-    const shell = (id: string): Block => ({
-      id,
-      role: "tool",
-      text: "bash ls",
-      tool: { kind: "shell", title: "bash ls", status: "completed" },
-    });
-    const blocks: Block[] = [
-      { id: "thanks", role: "user", text: "thanks :)", startedAt: 0 },
-      { id: "welcome", role: "assistant", text: "You're welcome!" },
-      {
-        id: "completion",
-        role: "user",
-        text: "Private completion prompt",
-        internal: true,
-        appRequestId: "mono-completion-review",
-        startedAt: 60_000,
-      },
-      shell("check"),
-      { id: "cancelled", role: "assistant", text: "The review was cancelled." },
-    ];
-    const turns = cache.group(blocks, false, true);
-    expect(turns).toHaveLength(1);
-    for (const settled of [true, false]) {
-      const prose = cache
-        .turnItems(turns[0], settled, { inlineWork: true })
-        .flatMap((item) =>
-          item.type === "block" && item.block.role === "assistant"
-            ? [item.block.id]
-            : [],
-        );
-      expect(prose).toContain("welcome");
-      if (settled) expect(prose).toEqual(["welcome", "cancelled"]);
-    }
-  });
 });
 
-it("regroups when a changed Mono boundary joins the preceding turn", () => {
-  const cache = new TranscriptTurnCache();
-  const blocks = conversation();
-  cache.group(blocks, false, true);
-  const changed = blocks.slice();
-  changed[changed.length - 2] = { ...changed[changed.length - 2], sentAt: 10 };
-  expect(cache.group(changed, false, true)).toEqual(
-    groupMonoChatTurns(changed),
-  );
-});
-
-it.each([false, true])(
-  "matches fresh grouping across streaming, edits and rewinds (Mono=%s)",
-  (mono) => {
+it(
+  "matches fresh grouping across streaming, edits and rewinds",
+  () => {
     const cache = new TranscriptTurnCache();
-    const group = mono ? groupMonoChatTurns : groupTurns;
+    const group = groupTurns;
     let blocks = conversation();
     for (let i = 0; i < 100; i++) {
       if (i % 13 === 0) blocks = blocks.slice(0, -3);
@@ -245,7 +108,7 @@ it.each([false, true])(
             role: "user",
             text: "completion",
             internal: true,
-            appRequestId: `mono-completion-${i}`,
+            appRequestId: `app-${i}`,
           },
           { id: `reply-${i}`, role: "assistant", text: "Completed" },
         ];
@@ -261,7 +124,7 @@ it.each([false, true])(
           index === at ? { ...block, text: block.text + " more" } : block,
         );
       }
-      expect(cache.group(blocks, false, mono)).toEqual(group(blocks));
+      expect(cache.group(blocks, false)).toEqual(group(blocks));
     }
   },
 );

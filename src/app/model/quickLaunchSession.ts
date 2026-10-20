@@ -41,7 +41,7 @@ export async function acceptQuickLaunch(
       sessionId: string,
       text: string,
       attachments: Attachment[],
-      options?: { intent: "plan" | "orchestrate" },
+      options?: { intent: "plan" },
     ) => SubmissionAcceptance;
     saveDraft?: (
       sessionId: string,

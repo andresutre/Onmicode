@@ -12,7 +12,6 @@ import {
   CurrentProjectIcon,
   useProjectLabel,
 } from "../../features/projects/ui/CurrentProjectIcon";
-import { OrchestrationSidebarAgents } from "../../features/orchestration/ui/OrchestrationSidebarAgents";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Archive,
@@ -35,7 +34,6 @@ import {
   Pin,
   Plus,
   Search,
-  Share,
   Settings,
   StickyNote,
   Zap,
@@ -82,7 +80,6 @@ import type { OpenFileFn } from "../../features/search/model/search";
 import { sessionDisplayTitle } from "../../features/sessions/model/session";
 import { ParticleText } from "../../shared/ui/ParticleText";
 import { nextUnseenFinishedSessions } from "../../features/sessions/model/sessionDone";
-import { orchestrationTaskLabel } from "../../features/orchestration/model/orchestrationSummary";
 import {
   orderedSessionActionIds,
   pruneSessionSelection,
@@ -98,7 +95,6 @@ import { LAYER } from "../../shared/lib/layers";
 import { RevealHeight } from "../../shared/ui/RevealHeight";
 import { MODE_COMMAND_STYLES } from "../../features/sessions/ui/modeCommands";
 import { OPERATOR_COMMAND } from "../../features/sessions/model/operatorCommand";
-import { ORCHESTRATOR_COMMAND } from "../../features/sessions/model/orchestratorCommand";
 import {
   compareSessionSummaries,
   filterSessionsByArchive,
@@ -192,7 +188,6 @@ import { RailAction, RailSearch } from "./RailAction";
 import { TerminalSpinner } from "../../features/sessions/ui/TerminalSpinner";
 import { DevModeSlot, IconButton, TabVisitNav } from "./TitleBar";
 import { ProjectSearch } from "../../features/projects/ui/ProjectSearch";
-import { Popover } from "../../shared/ui/Popover";
 import {
   pickerProjects,
   ProjectPickerPopover,
@@ -213,25 +208,7 @@ import { SidebarUpdateFooter } from "./SidebarUpdate";
 import { SourceControl } from "../../features/source-control/ui/SourceControl";
 import { GitHistoryGraph } from "../../features/source-control/ui/GitHistoryGraph";
 import { GithubStarPrompt } from "./GithubStarPrompt";
-import {
-  isMonoSession,
-  listMonos,
-  MONO_STATUS_LABEL,
-  monoLook,
-  monosSnapshot,
-  subscribeMonos,
-  type MonoStatus,
-} from "../../features/monos/model/mono";
-import { MonoRailMascot } from "../../features/monos/ui/MonoRailMascot";
-import { useRailMonosPinned } from "../../features/settings/model/displayPrefs";
-import type { PickerMonos } from "../../features/projects/ui/SearchableProjectPicker";
-import { isHabitRun } from "../../features/monos/model/monoHabits";
-import {
-  MonoRailSection,
-  unreadBadge,
-  unreadLabel,
-  type MonoRailProps,
-} from "./MonoRailSection";
+
 import {
   refreshRemoteProjectSessions,
   remoteRequest,
@@ -411,10 +388,6 @@ type Props = {
   updateNotice?: InstalledUpdate | null;
   onOpenWhatsNew?: (version: string) => void;
   onDismissUpdate?: () => void;
-  /** The Monos on the rail; absent while Monos are off. */
-  monos?: MonoRailProps;
-  /** A Mono fills the main area, which has no project sidebar. */
-  monoViewActive?: boolean;
 };
 
 function SidebarComponent({
@@ -508,8 +481,6 @@ function SidebarComponent({
   updateNotice = null,
   onOpenWhatsNew,
   onDismissUpdate,
-  monos,
-  monoViewActive = false,
 }: Props) {
   const trafficLightsVisible = useTrafficLightsVisible();
   const remoteProject = isRemoteProjectPath(cwd);
@@ -774,22 +745,17 @@ function SidebarComponent({
     : pending && sessions.length === 0;
   const worktreeFocus = useWorktreeFocus(cwd);
   const focusedWorktree = remoteProject ? undefined : worktreeFocus;
-  useSyncExternalStore(subscribeMonos, monosSnapshot);
   const listableSessions = mergeFolderSessionSummaries(
     projectSessions,
     remoteProject ? [] : openSessions,
     sessionFolders,
   ).filter(
     (session) =>
-      !isMonoSession(session.id) &&
       !("ephemeral" in session && session.ephemeral) &&
-      !isHabitRun(session.id) &&
-      !session.orchestrationLeadId &&
       inWorktreeFocus(session, focusedWorktree),
   );
   // Sessions saved hidden still show when a listed session started them:
-  // /operator launches were once hidden like a Mono's by mistake. A Mono's
-  // chat is never listed, so its hidden launches stay hidden.
+  // /operator launches were once hidden by mistake.
   const shownSessionIds = new Set(
     listableSessions
       .filter((session) => !session.sidebarHidden)
@@ -823,7 +789,7 @@ function SidebarComponent({
     ),
   ].sort(compareSessionSummaries);
   // The inset list hangs the sessions an /operator thread started under it,
-  // like an orchestrator's agents, rather than listing them on their own.
+  // rather than listing them on their own.
   const startedSessions = inset
     ? groupStartedSessions(visibleSessions)
     : NO_STARTED_SESSIONS;
@@ -984,20 +950,17 @@ function SidebarComponent({
     notesActive ||
     automationsActive ||
     settingsOpen;
-  // A remembered Mono sits underneath these views; select it only while visible.
-  const railMonos = monos
-    ? { ...monos, activeId: otherViewActive ? undefined : monos.activeId }
-    : undefined;
-  // Likewise the session they cover stays current but isn't shown selected.
-  const highlightedSessionId =
-    otherViewActive || monoViewActive ? undefined : activeListedSessionId;
+  // The session these views cover stays current but isn't shown selected.
+  const highlightedSessionId = otherViewActive
+    ? undefined
+    : activeListedSessionId;
   // The inset sidebar holds the links to search, inbox, notes and
   // automations, and lets new users open their first project and Settings.
   // It stays available without a project; only settings take its place.
   // The classic sidebar only has project-scoped tools and sessions.
   const sidebarAvailable = inset
     ? !settingsOpen
-    : !otherViewActive && !monoViewActive && inProject;
+    : !otherViewActive && inProject;
   const sidebarVisible = open && sidebarAvailable;
   // With the sidebar collapsed beside the compact rail, its tab shortcuts
   // open the sidebar temporarily until the user clicks away.
@@ -2670,10 +2633,7 @@ function SidebarComponent({
           }
         >
           {navList}
-          {/* The project's Monos, above its folders. */}
-          {inset && railMonos && inProject ? (
-            <MonoRailSection {...railMonos} project={cwd} />
-          ) : null}
+
           {!cwd || cwd === "~" ? (
             <div className="px-3 py-2 text-[12px] text-content/50">
               <p>No project folder</p>
@@ -3238,8 +3198,6 @@ function SidebarComponent({
           onTogglePanel={onToggleProjectRail}
           onLeaveActive={onGoBack}
           titleBarAbove={titleBarAbove}
-          monos={railMonos}
-          monoViewActive={monoViewActive}
         />
       ) : null}
       {railMounted.current && onSelectProject && onOpenProject ? (
@@ -3281,7 +3239,6 @@ function SidebarComponent({
           updateNotice={updateNotice}
           onOpenWhatsNew={onOpenWhatsNew}
           onDismissUpdate={onDismissUpdate}
-          monos={railMonos}
         />
       ) : null}
     </>
@@ -3553,8 +3510,6 @@ function CompactProjectRail({
   onTogglePanel,
   onLeaveActive,
   titleBarAbove,
-  monos,
-  monoViewActive = false,
 }: {
   cwd: string;
   recents: RecentProject[];
@@ -3586,32 +3541,7 @@ function CompactProjectRail({
   onTogglePanel?: () => void;
   onLeaveActive?: () => void;
   titleBarAbove: boolean;
-  /** Monos have no row here, so the project button lists them too. */
-  monos?: MonoRailProps;
-  /** A Mono fills the main area: no workspace tab is the current one. */
-  monoViewActive?: boolean;
 }) {
-  const monosSnap = useSyncExternalStore(subscribeMonos, monosSnapshot);
-  const monosPinned = useRailMonosPinned();
-  const monoItems = useMemo(() => {
-    if (!monos) return [];
-    return listMonos().map((mono) => ({
-      id: mono.id,
-      ...monoLook(mono),
-      status: monos.states.get(mono.id)?.status ?? "idle",
-    }));
-    // The roster is read through its snapshot.
-  }, [monos, monosSnap]);
-  const pickerMonos = useMemo((): PickerMonos | undefined => {
-    if (!monos) return undefined;
-    return {
-      // Pinned Monos have their own buttons; the picker keeps "New mono".
-      items: monosPinned ? [] : monoItems,
-      activeId: monos.activeId,
-      onOpen: monos.onOpen,
-      onCreate: monos.onCreate,
-    };
-  }, [monos, monoItems, monosPinned]);
   const [inboxMenu, setInboxMenu] = useState<{ x: number; y: number } | null>(
     null,
   );
@@ -3622,8 +3552,7 @@ function CompactProjectRail({
     !searchActive &&
     !inboxActive &&
     !notesActive &&
-    !automationsActive &&
-    !monoViewActive;
+    !automationsActive;
   const openWorkspaceTab = (nextTab: SidebarTab) => {
     if (!workspaceActive) onLeaveActive?.();
     onTabChange(nextTab);
@@ -3660,38 +3589,6 @@ function CompactProjectRail({
           icon={PanelLeft}
           onClick={onTogglePanel}
         />
-        {monos && monosPinned && monoItems.length ? (
-          <>
-            <div
-              role="group"
-              aria-label="Monos"
-              data-compact-rail-monos
-              className="flex flex-col items-center gap-1.5"
-            >
-              {monoItems.map((mono) => (
-                <CompactRailMono
-                  key={mono.id}
-                  name={mono.name}
-                  mascot={mono.mascot}
-                  color={mono.color}
-                  status={mono.status}
-                  active={mono.id === monos.activeId}
-                  unseen={
-                    mono.id === monos.activeId
-                      ? 0
-                      : (monos.unseenCounts?.get(mono.id) ?? 0)
-                  }
-                  onClick={() => monos.onOpen(mono.id)}
-                />
-              ))}
-            </div>
-            <span
-              aria-hidden
-              data-compact-rail-monos-divider
-              className="h-px w-6 shrink-0 bg-stroke"
-            />
-          </>
-        ) : null}
         {onSelectProject ? (
           <SearchableProjectPickerWithMenu
             cwd={cwd}
@@ -3703,7 +3600,6 @@ function CompactProjectRail({
             onOpenProject={onOpenProject}
             onRemoveProject={onRemoveProject}
             onOpenNotificationSettings={onOpenNotificationSettings}
-            monos={pickerMonos}
           />
         ) : null}
         <div
@@ -3798,58 +3694,6 @@ function CompactProjectRail({
       ) : null}
       {railTooltip.tooltip}
     </nav>
-  );
-}
-
-function CompactRailMono({
-  name,
-  mascot,
-  color,
-  status,
-  active,
-  unseen,
-  onClick,
-}: {
-  name: string;
-  mascot: string;
-  color: string;
-  status: MonoStatus;
-  active: boolean;
-  /** Replies the user has not read. */
-  unseen: number;
-  onClick: () => void;
-}) {
-  const label = `${name}, ${MONO_STATUS_LABEL[status]}`;
-  return (
-    <button
-      type="button"
-      data-rail-tip={name}
-      data-rail-tip-detail={
-        unseen
-          ? `${MONO_STATUS_LABEL[status]} · ${unreadLabel(unseen)}`
-          : MONO_STATUS_LABEL[status]
-      }
-      aria-label={unseen ? `${label}, ${unreadLabel(unseen)}` : label}
-      aria-current={active ? "true" : undefined}
-      data-compact-rail-mono
-      onClick={onClick}
-      className={`relative grid size-8 shrink-0 place-items-center rounded-md active:scale-[0.97] ${
-        active
-          ? "bg-selection"
-          : "opacity-65 hover:bg-content/10 hover:opacity-100"
-      }`}
-    >
-      <MonoRailMascot name={mascot} color={color} status={status} />
-      {unseen ? (
-        <span
-          aria-hidden
-          data-mono-unread={unseen}
-          className="absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-background-base px-0.5 text-[9px] font-medium tabular-nums leading-none text-content/80 ring-1 ring-content/15"
-        >
-          {unreadBadge(unseen)}
-        </span>
-      ) : null}
-    </button>
   );
 }
 
@@ -4884,11 +4728,7 @@ export const SessionCard = memo(function SessionCard({
   const previewCloseTimer = useRef<number | null>(null);
   const previewId = useId();
   const [previewOpen, setPreviewOpen] = useState(false);
-  const orchestrationTooltipRootRef = useRef<HTMLDivElement>(null);
-  const orchestrationTooltipId = useId();
   const [dragging, setDragging] = useState(false);
-  const [orchestrationTooltipOpen, setOrchestrationTooltipOpen] =
-    useState(false);
   const cancelPreviewClose = useCallback(() => {
     if (previewCloseTimer.current != null) {
       window.clearTimeout(previewCloseTimer.current);
@@ -4909,60 +4749,37 @@ export const SessionCard = memo(function SessionCard({
     previewCloseTimer.current = window.setTimeout(closePreview, 120);
   };
   useEffect(() => cancelPreviewClose, [cancelPreviewClose]);
-  const orchestration = session.orchestration;
   const draft = !!session.draft;
-  const orchestrationExpanded =
-    !!orchestration && (isActive || isSelected || busy);
-  // An orchestrator or /operator thread opens a rail of work below it.
-  const expandable =
-    dense &&
-    !nested &&
-    ((!!orchestration && !orchestrationExpanded) ||
-      (startedCount > 0 && !startedOpen));
+  // An /operator thread opens a rail of work below it.
+  const expandable = dense && !nested && startedCount > 0 && !startedOpen;
   const markHover = expandable ? " group-hover:hidden" : "";
   // Marked on the right like a linked issue or PR, in its mode's colour.
-  const modeStyle = orchestration
-    ? MODE_COMMAND_STYLES[ORCHESTRATOR_COMMAND.name]
-    : startedCount > 0
-      ? MODE_COMMAND_STYLES[OPERATOR_COMMAND.name]
-      : undefined;
-  const modeLabel = orchestration
-    ? `Orchestrator, ${orchestration.tasks.length} ${
-        orchestration.tasks.length === 1 ? "agent" : "agents"
-      }`
-    : `Operator, started ${startedCount} ${
-        startedCount === 1 ? "session" : "sessions"
-      }`;
+  const modeStyle =
+    startedCount > 0 ? MODE_COMMAND_STYLES[OPERATOR_COMMAND.name] : undefined;
+  const modeLabel = `Operator, started ${startedCount} ${
+    startedCount === 1 ? "session" : "sessions"
+  }`;
   const modeBadge =
     dense && !nested && modeStyle ? (
       <span
         role="img"
         title={modeLabel}
         aria-label={modeLabel}
-        data-session-mode={orchestration ? "orchestrator" : "operator"}
+        data-session-mode="operator"
         className={`grid size-4 shrink-0 place-items-center ${modeStyle.className}`}
       >
         <modeStyle.Icon className="size-3" strokeWidth={1.75} />
       </span>
     ) : null;
-  // Set once the card has painted, so only later changes animate.
-  const cardShown = useRef(false);
-  useEffect(() => {
-    cardShown.current = true;
-  }, []);
-  const orchestrationDone =
-    orchestration?.tasks.filter((task) => task.status === "completed").length ??
-    0;
   const title = sessionDisplayTitle(session.title, session.harness);
   const gitLabel = session.worktreeRemoved
     ? NO_BRANCH_LABEL
     : formatGitLabel(session.repo, session.branch);
   const time = formatRelative(session.updatedAt, now);
-  const headerRow = !(compact && !orchestrationExpanded) && !modelInFooter;
-  const model =
-    compact && !orchestrationExpanded
-      ? null
-      : resolveModel(session.harness, session.model).name;
+  const headerRow = !compact && !modelInFooter;
+  const model = compact
+    ? null
+    : resolveModel(session.harness, session.model).name;
   const statusClass = needsApproval
     ? "text-amber-400"
     : busy
@@ -4979,7 +4796,7 @@ export const SessionCard = memo(function SessionCard({
       {needsApproval ? (
         <>
           <CircleAlert className="size-3" strokeWidth={1.75} />
-          <span>{orchestration ? "Needs input" : "Need approval"}</span>
+          <span>Need approval</span>
         </>
       ) : busy ? (
         <>
@@ -5196,20 +5013,8 @@ export const SessionCard = memo(function SessionCard({
   };
 
   const archiveLabel = session.archived ? "Unarchive" : "Archive";
-  // Expanding an orchestration card must not move its existing header. Keep
-  // the collapsed top inset and give only the new detail area extra room at
-  // the bottom.
   // Dense rows match the project rail's 32px rows.
-  // Dense rows hang their agents on a rail below the card instead.
-  const cardPaddingY = dense
-    ? "py-[3px]"
-    : orchestrationExpanded
-      ? compact
-        ? "pb-2.5 pt-1.5"
-        : "pb-2.5 pt-2"
-      : compact
-        ? "py-1.5"
-        : "py-2";
+  const cardPaddingY = dense ? "py-[3px]" : compact ? "py-1.5" : "py-2";
 
   return (
     <>
@@ -5218,7 +5023,6 @@ export const SessionCard = memo(function SessionCard({
           ref={previewAnchor}
           title={dense ? undefined : title}
           data-session-card={session.id}
-          data-orchestration-card={orchestration ? "true" : undefined}
           data-session-selected={isSelected ? "true" : undefined}
           data-tauri-drag-region="false"
           onPointerDown={onPointerDown}
@@ -5254,11 +5058,7 @@ export const SessionCard = memo(function SessionCard({
                     : draft
                       ? "border-content/25 border-dashed text-content/80 hover:bg-content/5 hover:text-content"
                       : `text-content/80 hover:text-content border-transparent ${
-                          orchestrationExpanded && !dense
-                            ? "bg-content/5 hover:bg-content/10"
-                            : startedInView
-                              ? "bg-content/5"
-                              : "hover:bg-content/5"
+                          startedInView ? "bg-content/5" : "hover:bg-content/5"
                         }`
           }`}
         >
@@ -5394,9 +5194,7 @@ export const SessionCard = memo(function SessionCard({
                     {needsApproval ? (
                       <CircleAlert
                         role="img"
-                        aria-label={
-                          orchestration ? "Needs input" : "Needs approval"
-                        }
+                        aria-label="Needs approval"
                         className="size-3.5 text-amber-400"
                         strokeWidth={1.75}
                       />
@@ -5456,12 +5254,6 @@ export const SessionCard = memo(function SessionCard({
               </span>
             )}
           </div>
-          {orchestrationExpanded && !dense ? (
-            <OrchestrationSidebarAgents
-              leadId={session.id}
-              summary={orchestration!}
-            />
-          ) : null}
           {dense ? null : (
             <span className="relative mt-1 flex items-center gap-2">
               {project && !gitLabel ? (
@@ -5535,42 +5327,6 @@ export const SessionCard = memo(function SessionCard({
                     <Zap className="size-3" strokeWidth={1.75} />
                   </span>
                 ) : null}
-                {orchestration ? (
-                  <div
-                    ref={orchestrationTooltipRootRef}
-                    className="relative shrink-0"
-                    onMouseEnter={() => setOrchestrationTooltipOpen(true)}
-                    onMouseLeave={() => setOrchestrationTooltipOpen(false)}
-                  >
-                    <button
-                      type="button"
-                      data-no-drag
-                      data-tauri-drag-region="false"
-                      data-orchestration-icon
-                      aria-label={`Orchestrator, ${orchestration.tasks.length} ${
-                        orchestration.tasks.length === 1
-                          ? "subagent"
-                          : "subagents"
-                      }, ${orchestrationDone} done`}
-                      aria-describedby={
-                        orchestrationTooltipOpen
-                          ? orchestrationTooltipId
-                          : undefined
-                      }
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onFocus={() => setOrchestrationTooltipOpen(true)}
-                      onBlur={() => setOrchestrationTooltipOpen(false)}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setOrchestrationTooltipOpen(false);
-                        onSelect(session.id, event);
-                      }}
-                      className="grid size-5 shrink-0 place-items-center rounded-md text-fuchsia-300/65 hover:bg-content/10 hover:text-fuchsia-200/90"
-                    >
-                      <Share className="size-3" />
-                    </button>
-                  </div>
-                ) : null}
               </span>
             </span>
           )}
@@ -5586,82 +5342,7 @@ export const SessionCard = memo(function SessionCard({
             onPointerLeave={schedulePreviewClose}
           />
         ) : null}
-        {orchestration && orchestrationTooltipOpen ? (
-          <Popover
-            anchor={orchestrationTooltipRootRef}
-            side="right"
-            align="end"
-            width={248}
-            maxHeight={320}
-            role="tooltip"
-            id={orchestrationTooltipId}
-            className="pointer-events-none overflow-y-auto p-2.5"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[11px] font-semibold text-content/85">
-                Subagents
-              </span>
-              <span className="shrink-0 text-[10px] tabular-nums text-content/45">
-                {orchestrationDone}/{orchestration.tasks.length} done
-              </span>
-            </div>
-            <div className="mt-1.5 flex flex-col gap-0.5">
-              {orchestration.tasks.map((task) => {
-                const label = orchestrationTaskLabel(task, orchestration);
-                return (
-                  <div
-                    key={task.sessionId}
-                    className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-1"
-                  >
-                    <HarnessIcon
-                      harness={task.harness}
-                      className="size-3.5 shrink-0 opacity-75"
-                    />
-                    <span className="min-w-0 flex-1 truncate text-[11px] text-content/75">
-                      {task.title}
-                    </span>
-                    <span
-                      className={`shrink-0 text-[10px] ${
-                        task.needsInput ||
-                        task.status === "failed" ||
-                        task.status === "blocked" ||
-                        task.status === "interrupted"
-                          ? "text-amber-400"
-                          : label === "Working"
-                            ? "text-accent"
-                            : task.status === "completed"
-                              ? "text-emerald-400"
-                              : "text-content/45"
-                      }`}
-                    >
-                      {label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </Popover>
-        ) : null}
       </div>
-      {/* Under the row, outside its highlight and its hover actions, like a
-          tool step's rail. */}
-      {orchestration && dense ? (
-        // Opening under a row already on screen grows in and pushes the
-        // list down; one the list loads with is simply there.
-        <RevealHeight
-          open={orchestrationExpanded}
-          animateIn={cardShown.current}
-        >
-          {/* One item, padding and all, for the reveal to grow. */}
-          <div>
-            <OrchestrationSidebarAgents
-              leadId={session.id}
-              summary={orchestration}
-              variant="tree"
-            />
-          </div>
-        </RevealHeight>
-      ) : null}
     </>
   );
 });

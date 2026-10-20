@@ -1,5 +1,3 @@
-import type { OrchestrationRun } from "../../orchestration/model/orchestration";
-import { summarizeOrchestration } from "../../orchestration/model/orchestrationSummary";
 import { fuzzyMatch } from "../../../shared/lib/fuzzy";
 import { projectName } from "../../../shared/lib/paths";
 import { plainEqual } from "../../../shared/hooks/useStableValue";
@@ -35,9 +33,6 @@ export function mergeHistorySummary(
     ...summary,
     archived: summary.archived ?? previous?.archived,
     pinned: summary.pinned ?? previous?.pinned,
-    orchestration: summary.orchestration ?? previous?.orchestration,
-    orchestrationLeadId:
-      summary.orchestrationLeadId ?? previous?.orchestrationLeadId,
     automationId: summary.automationId ?? previous?.automationId,
   };
   return [next, ...current.filter((entry) => entry.id !== summary.id)].sort(
@@ -107,7 +102,6 @@ export function summaryFromSession(
 ): SessionSummary {
   return {
     id: session.id,
-    orchestrationLeadId: session.orchestrationLeadId,
     sidebarHidden: session.sidebarHidden,
     cwd: session.cwd,
     harness: session.harness,
@@ -179,31 +173,19 @@ export function historyWithLiveSessions(
   sessions: Session[],
   cwd: string,
   git?: SessionGitHint,
-  runs: readonly OrchestrationRun[] = [],
 ): SessionSummary[] {
-  const workerIds = new Set([
-    ...sessions
-      .filter((session) => session.orchestrationLeadId)
-      .map((session) => session.id),
-    ...history.flatMap(
-      (row) => row.orchestration?.tasks.map((task) => task.sessionId) ?? [],
-    ),
-    ...runs.flatMap((run) => run.tasks.map((task) => task.sessionId)),
-  ]);
   const inboxIds = new Set(
     sessions.filter((session) => session.inboxAsk).map((session) => session.id),
   );
   let rows = history.filter(
     (entry) =>
       !inboxIds.has(entry.id) &&
-      !entry.orchestrationLeadId &&
-      !workerIds.has(entry.id) &&
       sameProjectPath(entry.cwd, cwd),
   );
   const hint = projectGitHint(rows, gitOverlayForCwd(cwd, git));
   for (const session of sessions) {
     // Ephemeral sessions are never chats of the project, even while busy.
-    if (session.ephemeral || session.inboxAsk || workerIds.has(session.id))
+    if (session.ephemeral || session.inboxAsk)
       continue;
     if (!sameProjectPath(session.cwd, cwd)) continue;
     const live = session.busy || sessionNeedsInput(session);
@@ -239,13 +221,5 @@ export function historyWithLiveSessions(
     };
     rows = mergeHistorySummary(rows, summaryFromSession(session, sessionHint));
   }
-  const byLead = new Map(runs.map((run) => [run.leadId, run]));
-  return rows
-    .map((row) => {
-      const run = byLead.get(row.id);
-      return run
-        ? { ...row, orchestration: summarizeOrchestration(run, sessions) }
-        : row;
-    })
-    .sort(compareSessionSummaries);
+  return rows.sort(compareSessionSummaries);
 }

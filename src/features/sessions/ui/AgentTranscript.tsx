@@ -35,7 +35,6 @@ import { flushSync } from "react-dom";
 import { AttachmentChip } from "./AttachmentChip";
 import { GeneratedImage } from "./GeneratedImage";
 import { MonocodeSparkles } from "./MonocodeSparkles";
-import { OrchestratorConstellation } from "./OrchestratorConstellation";
 import { PlanStepsBurst } from "./PlanStepsBurst";
 import { settleCatchUpFades } from "./wordFade";
 import { revealMeasuredTurn, useMeasuredHistory } from "./useMeasuredHistory";
@@ -55,27 +54,19 @@ import { FilePreview } from "../../files/ui/FilePreview";
 import { FileTypeIcon } from "../../files/ui/FileTypeIcon";
 import { ToolDiffPreview } from "./ToolDiffPreview";
 import { PlanPreview } from "./PlanPreview";
-import { OrchestrationPreview } from "../../orchestration/ui/OrchestrationPreview";
 import { TaskListPreview } from "./TaskListPreview";
 import { HandoffButton, SecondOpinionButton } from "./SecondOpinionButton";
 import { SecondOpinionCard } from "./SecondOpinionCard";
 import { NoteMiniCard } from "../../notes/ui/NoteMiniCard";
-import { ArtifactCard } from "../../artifacts/ui/ArtifactCard";
-import { artifactCards } from "../../artifacts/artifacts";
 
 import { TerminalSpinner } from "./TerminalSpinner";
 import { Popover } from "../../../shared/ui/Popover";
 import { ProjectMascot } from "../../projects/ui/ProjectMascot";
-import { PixelMascot } from "../../projects/ui/PixelMascot";
-import type { MonoLook } from "../../monos/model/mono";
-import {
-  monoSpawnedSessions,
-  type LaunchedSessionView,
-} from "../../monos/model/monoSpawnedSessions";
-import type { MonoSpawnedSession } from "../model/session";
-import { LaunchedSessionCard } from "../../monos/ui/LaunchedSessionCard";
-import type { MessageDelivery } from "../../monos/model/monoMessaging";
-import { monoReactionBlocks } from "../../monos/model/monoReaction";
+/** A message the app has not delivered to the agent yet. */
+type MessageDelivery = {
+  status: "pending" | "paused" | "failed";
+  error?: string;
+};
 import type { ApprovalDecision } from "../../../integrations/harness";
 import {
   isHarnessAuthError,
@@ -89,7 +80,6 @@ import {
 } from "../../../integrations/harness/core/preview";
 import { copyMessage } from "../../../platform/tauri/clipboard";
 import type { Attachment } from "../model/session";
-import { visibleUserPrompt } from "../../orchestration/model/orchestration";
 import { playCue } from "../../settings/model/sounds";
 import { legacyTaskListFromText } from "../model/taskList";
 import { resolveModel } from "../model/models";
@@ -120,8 +110,6 @@ import { useBottomChatMotion } from "../hooks/useBottomChatMotion";
 import { useTranscriptSelection } from "../hooks/useTranscriptSelection";
 import type { TranscriptLayout } from "../../settings/model/appearance";
 import { AgentMarkdown } from "./AgentMarkdown";
-import { MonoWorkTicker } from "./MonoWorkTicker";
-import { monoWorkStatus } from "../model/monoWorkStatus";
 import { isEmojiOnlyMessage } from "../model/emojiMessage";
 import { attachmentPreviewSrc } from "../model/attachments";
 import { TranscriptSelectionMenu } from "./TranscriptSelectionMenu";
@@ -155,9 +143,6 @@ import {
   workKind,
   workSummaryLine,
   joinedTurnStart,
-  monoTurnLatestStart,
-  monoTurnRuns,
-  opensNewStretch,
   type ActivityPhase,
   type ActivityPhaseKind,
   type ToolCallState,
@@ -222,27 +207,8 @@ type Props = {
   onReturnToLatest?: () => void;
   busy?: boolean;
   cwd?: string;
-  /** Who the turns are by, in place of the model: a Mono's name. */
-  agentName?: string;
-  /** A Mono's mascot and color, in place of the provider's mark. */
-  agentMascot?: Pick<MonoLook, "mascot" | "color">;
   /** Keeps short conversations at the bottom and skips prompt-to-top anchoring. */
   bottomAligned?: boolean;
-  /** Keeps process in the activity trail, with live progress in the header. */
-  inlineWork?: boolean;
-  messageDeliveries?: ReadonlyMap<string, MessageDelivery>;
-  onRetryMessage?: (blockId: string) => void;
-  /** Inspect a Mono turn in the activity sidebar. */
-  onShowWork?: (turnId: string, blocks: Block[]) => void;
-  activeWorkTurnId?: string;
-  /** Open one of a Mono turn's launched sessions in the sidebar. */
-  onOpenSession?: (turnId: string, blocks: Block[], sessionId: string) => void;
-  /** Launched sessions' live status by id, where this window tracks it. */
-  launchedSessions?: ReadonlyMap<string, LaunchedSessionView>;
-  /** The launched session open in the sidebar. */
-  openSessionId?: string;
-  /** Marks when each message was sent, for one conversation kept over days. */
-  daySeparators?: boolean;
   /** Leaves token and speed details out of each turn's footer. */
   hideTurnMetrics?: boolean;
   harness?: HarnessId;
@@ -258,7 +224,6 @@ type Props = {
   onRemoveDraft?: (block: Block) => boolean | void;
   onSaveSelectionNote?: (text: string) => void | Promise<void>;
   onOpenFile?: (path: string) => void;
-  onOpenArtifact?: (id: string) => void;
   onOpenDiff?: (path: string) => void;
   onOpenPlan?: (blockId: string) => void;
   onBuildPlan?: (blockId: string, target?: PlanBuildTarget) => void;
@@ -282,7 +247,7 @@ type Props = {
   /** Kept mounted after its pane closed. Showing it again counts as a new visit. */
   parked?: boolean;
   onScrollerChange?: (el: HTMLDivElement | null) => void;
-  /** A worker's transcript: show the orchestrator's turns instead of hiding them. */
+  /** Show turns the app wrote on the user's behalf instead of hiding them. */
   managed?: boolean;
   /** Saved session that omitted tool output is fetched from. */
   sessionId?: string;
@@ -299,18 +264,7 @@ function AgentTranscriptComponent({
   onReturnToLatest,
   busy,
   cwd,
-  agentName,
-  agentMascot,
   bottomAligned = false,
-  inlineWork = false,
-  messageDeliveries,
-  onRetryMessage,
-  onShowWork,
-  activeWorkTurnId,
-  onOpenSession,
-  launchedSessions,
-  openSessionId,
-  daySeparators = false,
   hideTurnMetrics = false,
   harness,
   model,
@@ -324,7 +278,6 @@ function AgentTranscriptComponent({
   onRemoveDraft,
   onSaveSelectionNote,
   onOpenFile,
-  onOpenArtifact,
   onOpenDiff,
   onOpenPlan,
   onBuildPlan,
@@ -344,12 +297,8 @@ function AgentTranscriptComponent({
   onScrollerChange,
   managed = false,
 }: Props) {
-  const isMonoChat = !!agentMascot;
   const blocks = useMemo(() => {
-    // A Mono's reaction sits on the message it answers, not in a bubble.
-    const chatBlocks = isMonoChat
-      ? monoReactionBlocks(sourceBlocks)
-      : sourceBlocks;
+    const chatBlocks = sourceBlocks;
     if (!harness || !supportsHarnessLogin(harness)) return chatBlocks;
     const visibleBlocks = chatBlocks.filter(
       (block) =>
@@ -362,7 +311,7 @@ function AgentTranscriptComponent({
     return visibleBlocks.length === chatBlocks.length
       ? chatBlocks
       : visibleBlocks;
-  }, [harness, isMonoChat, sourceBlocks]);
+  }, [harness, sourceBlocks]);
   const editableUserBlockId = useMemo(
     () => lastUserTurnBlock(blocks)?.id,
     [blocks],
@@ -791,15 +740,9 @@ function AgentTranscriptComponent({
   );
 
   const [turnCache] = useState(() => new TranscriptTurnCache());
-  const undeliveredMessageIds = useMemo(
-    () => new Set(messageDeliveries?.keys()),
-    [messageDeliveries],
-  );
-  const turns = turnCache.group(blocks, managed, inlineWork);
-  // A scheduled update can land while the chat's own turn is still running.
+  const turns = turnCache.group(blocks, managed);
   const activeTurnIndex = turns.reduce(
-    (latest, turn, index) =>
-      turn[0].monoHabit || turn[0].role === "handoff" ? latest : index,
+    (latest, turn, index) => (turn[0].role === "handoff" ? latest : index),
     -1,
   );
   const firstVisibleTurn = Math.max(0, turns.length - visibleTurnCount);
@@ -1178,67 +1121,20 @@ function AgentTranscriptComponent({
         ) : null}
         {visibleTurns.map((turn, turnIndex) => {
           const isLastTurn = firstVisibleTurn + turnIndex === turns.length - 1;
-          // A Mono's own follow-up replies join the turn they follow; each
-          // run keeps its prompt, but the turn reads as one message.
-          const runs = inlineWork ? monoTurnRuns(turn) : [turn];
-          const userBlock = inlineWork
-            ? monoTurnUserBlock(runs[0], messageDeliveries)
-            : turnUserBlock(turn, managed);
-          const lastRun =
-            runs.length > 1
-              ? monoTurnUserBlock(runs[runs.length - 1], messageDeliveries)
-              : userBlock;
-          const habit = turn[0].monoHabit;
-          // Older saved reports may have lost their habit tag. A Mono's
-          // standalone reply still needs its identity and response actions.
-          const standaloneReply =
-            !userBlock && !!(agentName || habit) && turn.some(isProseBlock);
-          const durationMs =
-            runs.length > 1
-              ? sumDurations(
-                  runs.map(
-                    (run) =>
-                      monoTurnUserBlock(run, messageDeliveries)?.durationMs,
-                  ),
-                )
-              : userBlock?.durationMs;
+          const userBlock = turnUserBlock(turn, managed);
+          const durationMs = userBlock?.durationMs;
           const settled = !(
-            busy &&
-            !standaloneReply &&
-            firstVisibleTurn + turnIndex === activeTurnIndex
+            busy && firstVisibleTurn + turnIndex === activeTurnIndex
           );
-          const proposals = turn.filter((block) => block.orchestration);
-          const artifacts = artifactCards(turn);
-          // Proposals are turn results, like the changes card. Keep them out
-          // of the live work and append them after all of the lead's output.
-          const items = turnCache.turnItems(turn, settled, {
-            managed,
-            inlineWork,
-            undeliveredMessageIds,
-          });
+          const items = turnCache.turnItems(turn, settled, { managed });
           // Earlier activity groups have already been followed by prose or
           // more work. Only the last one can still be the live group.
           const foldedAt = lastActivityIndex(items);
           const initialThinkingAt = initialThinkingIndex(items);
           const startedAt =
             userBlock?.startedAt ??
-            habit?.at ??
             turn[0].startedAt ??
             joinedTurnStart(turns, firstVisibleTurn + turnIndex);
-          const previousTurn = turns[firstVisibleTurn + turnIndex - 1];
-          const previousAt = !previousTurn
-            ? undefined
-            : inlineWork
-              ? monoTurnLatestStart(previousTurn)
-              : (turnUserBlock(previousTurn, managed)?.startedAt ??
-                previousTurn[0].monoHabit?.at ??
-                previousTurn[0].startedAt);
-          const stampAt =
-            daySeparators &&
-            startedAt != null &&
-            opensNewStretch(startedAt, previousAt)
-              ? startedAt
-              : undefined;
           // The agent starting its answer is the end of the work: fold the
           // groups then, not when the turn finally settles, so the collapse
           // never lands under the text you have already started reading.
@@ -1259,114 +1155,36 @@ function AgentTranscriptComponent({
           // Work the turn has already answered for folds away behind one line,
           // leaving the prompt and the answer to it.
           const turnId = turn[0].id;
-          const spawnedSessions = inlineWork ? monoSpawnedSessions(turn) : [];
-          const launchCards = launchAnchors(items, spawnedSessions);
-          const renderLaunches = (
-            launches: readonly MonoSpawnedSession[],
-            key: string,
-            spacing: string,
-          ) => (
-            <div
-              key={key}
-              data-launched-sessions
-              className={`flex flex-col gap-2 px-4 pt-1 ${spacing}`}
-            >
-              {launches.map((launch) => (
-                <LaunchedSessionCard
-                  key={launch.sessionId}
-                  launch={launch}
-                  view={launchedSessions?.get(launch.sessionId)}
-                  open={openSessionId === launch.sessionId}
-                  onOpen={
-                    onOpenSession
-                      ? () => onOpenSession(turnId, turn, launch.sessionId)
-                      : undefined
-                  }
-                />
-              ))}
-            </div>
-          );
-          const fold = inlineWork ? undefined : foldableWork(items);
-          const folded = fold ? foldedBlocks(items, fold) : [];
-          const summarizedWork = inlineWork
-            ? items.flatMap((item) =>
-                item.type === "block" ? [] : item.blocks,
-              )
-            : folded;
+          const fold = foldableWork(items);
+          const summarizedWork = fold ? foldedBlocks(items, fold) : [];
           const workOpen = openWork[turnId] ?? false;
           // The fold line is the turn's status line from the first token to
           // the last: the mark, and the clock beside it. It never moves, so a
           // turn settling does not shuffle the layout around the answer.
           const live = visible && !settled && !preparingHandoff;
-          // A Mono's turns are its own, whichever model ran them.
           const turnModelName =
-            agentName ??
-            turnModel?.name ??
-            (live ? currentModelName : undefined);
+            turnModel?.name ?? (live ? currentModelName : undefined);
           // The fold line speaks for the main agent only. A delegated run has
           // its own row, which says who is working and how it went, so saying
           // it again here would be two lines telling the same story.
-          const foldTitle: ReactNode =
-            habit || standaloneReply ? (
-              (agentName ?? habit?.name)
-            ) : live ? (
-              <LiveFoldTitle
-                startedAt={startedAt}
-                paused={waitingForApproval}
-                waitingLabel={
-                  managed && waitingForApproval
-                    ? "Waiting for orchestrator"
-                    : pendingQuestion
-                      ? "Waiting for answers"
-                      : undefined
-                }
-                background={backgroundTasks}
-                modelName={turnModelName}
-              />
-            ) : agentMascot && agentName ? (
-              // A Mono signs its settled turns with just its mascot and name.
-              <span className="font-medium text-content/80">{agentName}</span>
-            ) : durationMs != null ? (
-              formatWorkingDuration(durationMs, turnModelName, true)
-            ) : inlineWork && turnModelName ? (
-              turnModelName
-            ) : (
-              workSummaryLine(summarizedWork)
-            );
-          // A Mono that only reacted answered on the message itself.
-          const reactedOnly =
-            inlineWork &&
-            !live &&
-            items.every(
-              (item) => item.type === "block" && item.block.role === "user",
-            ) &&
-            items.some(
-              (item) => item.type === "block" && !!item.block.monoReaction,
-            );
-          const showFoldLine =
-            !reactedOnly &&
-            (!!habit ||
-              standaloneReply ||
-              live ||
-              durationMs != null ||
-              (inlineWork
-                ? items.some(
-                    (item) =>
-                      item.type !== "block" || item.block.role !== "user",
-                  )
-                : !!fold));
+          const foldTitle: ReactNode = live ? (
+            <LiveFoldTitle
+              startedAt={startedAt}
+              paused={waitingForApproval}
+              waitingLabel={pendingQuestion ? "Waiting for answers" : undefined}
+              background={backgroundTasks}
+              modelName={turnModelName}
+            />
+          ) : durationMs != null ? (
+            formatWorkingDuration(durationMs, turnModelName, true)
+          ) : (
+            workSummaryLine(summarizedWork)
+          );
+          const showFoldLine = live || durationMs != null || !!fold;
           // It sits where the work starts, from before there is any: the row
           // is there from the first token, so nothing shoves the answer down
           // when the turn folds.
-          const firstWork =
-            habit || standaloneReply
-              ? 0
-              : inlineWork
-                ? items.findIndex(
-                    (item) =>
-                      item.type !== "block" || item.block.role !== "user",
-                  )
-                : firstFoldableIndex(items);
+          const firstWork = firstFoldableIndex(items);
           const foldLineAt = fold
             ? fold.start
             : firstWork >= 0
@@ -1376,33 +1194,8 @@ function AgentTranscriptComponent({
             item.type === "block"
               ? item.block.id === searchCurrent
               : item.blocks.some((block) => block.id === searchCurrent);
-          // A reaction hides the reply between two messages, so the next
-          // turn's message stacks onto this one as if nothing came between.
-          const stacksIntoNextTurn =
-            reactedOnly &&
-            stacksAfterReaction(
-              turn,
-              turns[firstVisibleTurn + turnIndex + 1],
-              daySeparators,
-            );
-          const stackedOnPreviousTurn =
-            inlineWork &&
-            !!previousTurn &&
-            previousTurn.every((block) => block.role === "user") &&
-            stacksAfterReaction(previousTurn, turn, daySeparators);
-          const isCompactFollowUp = (item: TurnItem, index: number) => {
-            const next = items[index + 1];
-            return (
-              inlineWork &&
-              item.type === "block" &&
-              item.block.role === "user" &&
-              (next
-                ? next.type === "block" && next.block.role === "user"
-                : stacksIntoNextTurn)
-            );
-          };
           const renderItem = (item: TurnItem, itemIndex: number) =>
-            item.type === "subagents" && !inlineWork ? (
+            item.type === "subagents" ? (
               <SubagentStack
                 key={item.blocks[0].id}
                 blocks={item.blocks}
@@ -1412,16 +1205,7 @@ function AgentTranscriptComponent({
                 onOpenDiff={onOpenDiff}
               />
             ) : item.type !== "block" ? (
-              inlineWork ? (
-                <MonoWorkApprovals
-                  key={item.blocks[0].id}
-                  blocks={item.blocks}
-                  cwd={cwd}
-                  onApproval={onApproval}
-                  onOpenFile={onOpenFile}
-                  onOpenDiff={onOpenDiff}
-                />
-              ) : itemIndex === initialThinkingAt ? (
+              itemIndex === initialThinkingAt ? (
                 <InitialThinking
                   key={item.blocks[0].id}
                   live={visible && !settled}
@@ -1452,16 +1236,6 @@ function AgentTranscriptComponent({
                   !seenBlocks.current!.has(item.block.id)
                 }
                 layout={transcriptLayout}
-                bubbleTail={!!agentMascot}
-                localMedia={isMonoChat}
-                compactFollowUp={isCompactFollowUp(item, itemIndex)}
-                stackedOnPrevious={
-                  itemIndex === 0
-                    ? stackedOnPreviousTurn
-                    : isCompactFollowUp(items[itemIndex - 1], itemIndex - 1)
-                }
-                delivery={messageDeliveries?.get(item.block.id)}
-                onRetryMessage={onRetryMessage}
                 visible={item.block.role === "user" ? visible : undefined}
                 stickyIndex={firstVisibleTurn + turnIndex + 1}
                 // Prose reads the same wherever it lands: under the fold
@@ -1518,55 +1292,22 @@ function AgentTranscriptComponent({
           );
           const foldLineRow = (
             <TurnRow key="work-fold" folded={!showFoldLine}>
-              {inlineWork ? (
-                <MonoTurnHeader
-                  blocks={turn}
-                  title={foldTitle}
-                  name={turnModelName}
-                  harness={turnHarness}
-                  agentMascot={agentMascot}
-                  active={!settled}
-                  live={live}
-                  waitingForAnswers={!!pendingQuestion}
-                  backgroundTasks={backgroundTasks}
-                  onShowWork={
-                    onShowWork ? () => onShowWork(turnId, turn) : undefined
-                  }
-                  workExpanded={activeWorkTurnId === turnId}
-                  searchCurrent={
-                    turn.some((block) => block.id === searchCurrent) &&
-                    !items.some((item) =>
-                      item.type === "block"
-                        ? item.block.id === searchCurrent
-                        : item.blocks.some(
-                            (block) =>
-                              block.id === searchCurrent &&
-                              needsApproval(block),
-                          ),
-                    )
-                  }
-                />
-              ) : (
-                <WorkFoldLine
-                  title={foldTitle}
-                  kind={workKind(summarizedWork)}
-                  harness={turnHarness}
-                  agentMascot={agentMascot}
-                  live={live}
-                  expandable={!!fold}
-                  open={workOpen && !!fold}
-                  onToggle={() => toggleWork(turnId, workOpen)}
-                />
-              )}
+              <WorkFoldLine
+                title={foldTitle}
+                kind={workKind(summarizedWork)}
+                harness={turnHarness}
+                live={live}
+                expandable={!!fold}
+                open={workOpen && !!fold}
+                onToggle={() => toggleWork(turnId, workOpen)}
+              />
             </TurnRow>
           );
           return (
             <HistoryTurn
               key={turn[0].id}
               id={turnId}
-              // A stacked message sits as close as one in the same turn, so
-              // the gap between turns gives way.
-              className={`transcript-turn flex min-w-0 flex-col${inlineWork && !reactedOnly ? " transcript-turn-mono" : ""}${stacksIntoNextTurn ? " -mb-1" : ""}${
+              className={`transcript-turn flex min-w-0 flex-col${
                 isLastTurn ? " transcript-turn-live" : ""
               }${
                 promptAnchor && anchorTurn && isLastTurn && userBlock
@@ -1574,17 +1315,8 @@ function AgentTranscriptComponent({
                   : ""
               }`}
             >
-              {stampAt != null ? <DaySeparator at={stampAt} /> : null}
               {items
                 .flatMap((item, itemIndex) => {
-                  // The header carries the process; only approvals need a row
-                  // in the chat. The full turn remains in the activity sidebar.
-                  if (
-                    inlineWork &&
-                    item.type !== "block" &&
-                    !item.blocks.some(needsApproval)
-                  )
-                    return itemIndex === foldLineAt ? [foldLineRow] : [];
                   const inFold =
                     !!fold && itemIndex >= fold.start && itemIndex <= fold.end;
                   if (inFold) {
@@ -1644,107 +1376,30 @@ function AgentTranscriptComponent({
                       data-transcript-search-current={
                         isCurrentItem(item) || undefined
                       }
-                      className={`flow-root ${isCompactFollowUp(item, itemIndex) ? "pb-0" : "pb-1"}`}
+                      className="flow-root pb-1"
                     >
                       {renderItem(item, itemIndex)}
                     </div>
                   );
-                  // A launch's cards follow the reply after it once that reply
-                  // has finished streaming (CSS holds them through its fade).
-                  // That never reverts, so a report back reopening the turn
-                  // does not take them away again.
-                  const launches = launchCards.afterItem.get(itemIndex);
-                  const cards =
-                    launches &&
-                    (settled ||
-                      itemIndex < items.length - 1 ||
-                      (item.type === "block" && !item.block.streaming))
-                      ? [
-                          renderLaunches(
-                            launches,
-                            `launches-${turnItemKey(item)}`,
-                            "pb-3",
-                          ),
-                        ]
-                      : [];
-                  if (itemIndex !== foldLineAt) return [row, ...cards];
-                  return [foldLineRow, row, ...cards];
+                  if (itemIndex !== foldLineAt) return [row];
+                  return [foldLineRow, row];
                 })
                 .concat(foldLineAt >= items.length ? [foldLineRow] : [])}
-              {settled &&
-                proposals
-                  .filter((block) => block.orchestration?.status !== "planning")
-                  .map((block) => (
-                    <div
-                      key={block.id}
-                      className="px-4 pt-1 pb-2"
-                      data-orchestration-result
-                    >
-                      <OrchestrationPreview block={block} busy={!!busy} />
-                    </div>
-                  ))}
-              {/* Launches no reply followed wait for the turn to end. */}
-              {settled && launchCards.atEnd.length > 0
-                ? renderLaunches(
-                    launchCards.atEnd,
-                    "launches-end",
-                    artifacts.length > 0 ? "pb-1" : "pb-3",
-                  )
-                : null}
-              {settled && artifacts.length > 0 ? (
-                <div
-                  data-artifact-results
-                  className="flex flex-col gap-2 px-4 pt-1 pb-3"
-                >
-                  {artifacts.map((card) => (
-                    <ArtifactCard
-                      key={card.id}
-                      card={card}
-                      onOpen={onOpenArtifact}
-                    />
-                  ))}
-                </div>
-              ) : null}
               {/* The accessory keeps the pane's props, which go stale once parked. */}
               {isLastTurn && latestTurnAccessory && !parked
                 ? latestTurnAccessory
                 : null}
-              {settled &&
-              !reactedOnly &&
-              (durationMs != null ||
-                standaloneReply ||
-                (inlineWork && firstWork >= 0)) ? (
+              {settled && durationMs != null ? (
                 <TurnDuration
-                  revealOnHover={inlineWork}
-                  elapsedMs={durationMs ?? null}
-                  label={
-                    standaloneReply ? (agentName ?? habit?.name) : undefined
-                  }
+                  elapsedMs={durationMs}
                   metrics={hideTurnMetrics ? undefined : userBlock?.turnMetrics}
                   labelHidden={showFoldLine}
                   modelName={turnModelName}
                   completedAt={
-                    habit?.at ??
-                    (runs.length > 1 && lastRun?.startedAt != null
-                      ? lastRun.startedAt + (lastRun.durationMs ?? 0)
-                      : startedAt != null
-                        ? startedAt + (durationMs ?? 0)
-                        : undefined)
+                    startedAt != null ? startedAt + durationMs : undefined
                   }
-                  copyText={turnCopyText(
-                    inlineWork
-                      ? items.flatMap((item) =>
-                          item.type === "block" ? [item.block] : [],
-                        )
-                      : turn,
-                  )}
+                  copyText={turnCopyText(turn)}
                   onSaveNote={onSaveNote}
-                  onShowWork={
-                    inlineWork && onShowWork
-                      ? () => onShowWork(turnId, turn)
-                      : undefined
-                  }
-                  workExpanded={activeWorkTurnId === turnId}
                   harness={turnHarness}
                   fromHarness={turnHarness}
                   fromModel={turnModel?.id}
@@ -1854,23 +1509,6 @@ export function dayStamp(at: number, now = Date.now()): [string, string] {
               : { year: "numeric" }),
           }).format(at);
   return [day, formatClockTime(at)];
-}
-
-function DaySeparator({ at }: { at: number }) {
-  const [day, time] = dayStamp(at);
-  return (
-    <div
-      role="separator"
-      aria-label={`${day} ${time}`}
-      data-day-separator
-      className="flex items-center justify-center px-4 pb-3 pt-6 font-sans text-[12px]"
-    >
-      <span className="rounded-full bg-content/[0.07] px-3 py-1 leading-4">
-        <span className="font-semibold text-content/75">{day}</span>{" "}
-        <span className="text-content/45">{time}</span>
-      </span>
-    </div>
-  );
 }
 
 /** Placeholder for private reasoning before the first assistant text arrives. */
@@ -2432,7 +2070,6 @@ const TranscriptBlock = memo(function TranscriptBlock({
   }
 
   if (block.role === "plan") {
-    if (block.orchestration) return null;
     const legacyTasks = legacyTaskListFromText(block.text);
     if (legacyTasks) {
       return (
@@ -2512,23 +2149,6 @@ const TranscriptBlock = memo(function TranscriptBlock({
   );
 });
 
-/**
- * A Mono's emoji answer, on the corner of the message it answers. The top
- * left keeps it clear of the hover actions below.
- */
-function MonoReactionBadge({ emoji, live }: { emoji: string; live: boolean }) {
-  return (
-    <span
-      role="img"
-      aria-label={`Reacted ${emoji}`}
-      data-mono-reaction={emoji}
-      className={`${live ? "mono-reaction-in " : ""}mono-reaction-badge absolute -top-2.5 -left-2.5 z-[1] grid h-[22px] place-items-center rounded-[8px] px-[7px] font-sans text-[11px] leading-none`}
-    >
-      {emoji}
-    </span>
-  );
-}
-
 function UserMessageBlock({
   block,
   layout,
@@ -2565,8 +2185,6 @@ function UserMessageBlock({
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const [singleLine, setSingleLine] = useState(false);
-  // Only a reaction that arrives while the chat is open pops in.
-  const [reactionAtMount] = useState(block.monoReaction);
   const textRef = useRef<HTMLElement>(null);
   const card = block.secondOpinion;
   const note = block.noteCard;
@@ -2574,7 +2192,7 @@ function UserMessageBlock({
   const text =
     card && card.kind !== "handoff"
       ? ""
-      : visibleUserPrompt(monocode ? operatorUserPrompt(block) : block.text);
+      : (monocode ? operatorUserPrompt(block) : block.text).trimEnd();
   const messageLink = text ? parseUserMessageLink(text) : null;
   const displayText = messageLink
     ? `${messageLink.beforeText}${messageLink.afterText}`
@@ -2719,12 +2337,6 @@ function UserMessageBlock({
           className="relative select-none font-sans text-6xl leading-none"
         >
           {displayText.trim()}
-          {block.monoReaction ? (
-            <MonoReactionBadge
-              emoji={block.monoReaction}
-              live={block.monoReaction !== reactionAtMount}
-            />
-          ) : null}
         </div>
         {deliveryControl}
       </div>
@@ -2890,17 +2502,6 @@ function UserMessageBlock({
                   blockId={block.id}
                   startedAt={block.startedAt}
                 />
-              ) : block.intent === "orchestrate" ? (
-                <OrchestratorConstellation
-                  blockId={block.id}
-                  startedAt={block.startedAt}
-                />
-              ) : null}
-              {block.monoReaction ? (
-                <MonoReactionBadge
-                  emoji={block.monoReaction}
-                  live={block.monoReaction !== reactionAtMount}
-                />
               ) : null}
             </div>
           )}
@@ -3005,50 +2606,6 @@ function TurnRow({
   );
 }
 
-/** A turn item's identity, stable as the group it names grows. */
-/**
- * Where a turn's launched sessions go: each after the first reply that came
- * after its launch, so a Mono reporting back later in the same turn writes
- * below them, as it happened. A launch no reply has followed goes at the end.
- */
-function launchAnchors(
-  items: readonly TurnItem[],
-  launches: readonly MonoSpawnedSession[],
-): {
-  afterItem: Map<number, MonoSpawnedSession[]>;
-  atEnd: MonoSpawnedSession[];
-} {
-  const afterItem = new Map<number, MonoSpawnedSession[]>();
-  const atEnd: MonoSpawnedSession[] = [];
-  if (launches.length === 0) return { afterItem, atEnd };
-  const launched = items.map((item) =>
-    monoSpawnedSessions(
-      item.type === "block" ? [item.block] : item.blocks,
-      launches,
-    ).map((entry) => entry.sessionId),
-  );
-  for (const launch of launches) {
-    // The tool call that started it; the prompt also lists it, as a fallback.
-    const isPrompt = (index: number) => {
-      const item = items[index];
-      return item.type === "block" && item.block.role === "user";
-    };
-    const has = (index: number) => launched[index].includes(launch.sessionId);
-    let at = items.findIndex((_, index) => has(index) && !isPrompt(index));
-    if (at < 0) at = items.findIndex((_, index) => has(index));
-    const reply =
-      at < 0
-        ? -1
-        : items.findIndex(
-            (item, index) =>
-              index > at && item.type === "block" && isProseBlock(item.block),
-          );
-    if (reply < 0) atEnd.push(launch);
-    else afterItem.set(reply, [...(afterItem.get(reply) ?? []), launch]);
-  }
-  return { afterItem, atEnd };
-}
-
 function turnItemKey(item: TurnItem): string {
   return item.type === "block" ? item.block.id : item.blocks[0].id;
 }
@@ -3063,7 +2620,6 @@ function WorkFoldLine({
   title,
   kind,
   harness,
-  agentMascot,
   live = false,
   expandable,
   open,
@@ -3072,7 +2628,6 @@ function WorkFoldLine({
   title: ReactNode;
   kind: ActivityPhaseKind;
   harness?: HarnessId;
-  agentMascot?: Props["agentMascot"];
   live?: boolean;
   expandable: boolean;
   open: boolean;
@@ -3089,14 +2644,7 @@ function WorkFoldLine({
         />
       ) : (
         <>
-          {agentMascot ? (
-            <PixelMascot
-              name={agentMascot.mascot}
-              color={agentMascot.color}
-              still
-              className={`size-3.5 shrink-0 ${expandable ? "group-hover:opacity-0" : ""}`}
-            />
-          ) : harness ? (
+          {harness ? (
             <HarnessIcon
               harness={harness}
               className={`size-3.5 shrink-0 ${expandable ? "group-hover:opacity-0" : ""}`}
@@ -3126,19 +2674,12 @@ function WorkFoldLine({
       {title}
     </span>
   );
-  // A settled Mono turn signs off in a pill, like the day separators.
-  const content =
-    agentMascot && !live ? (
-      <MonoSignaturePill>
-        {icon}
-        {label}
-      </MonoSignaturePill>
-    ) : (
-      <>
-        {icon}
-        {label}
-      </>
-    );
+  const content = (
+    <>
+      {icon}
+      {label}
+    </>
+  );
   const row = `flex w-full min-w-0 items-center gap-1.5 px-4 py-1 text-left${
     open ? " zen-fold-drop" : ""
   }`;
@@ -3165,14 +2706,6 @@ function WorkFoldLine({
     >
       {content}
     </button>
-  );
-}
-
-function MonoSignaturePill({ children }: { children: ReactNode }) {
-  return (
-    <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-content/[0.07] py-0.5 pr-3 pl-2">
-      {children}
-    </span>
   );
 }
 
@@ -3386,273 +2919,6 @@ function markScrollEdges(el: HTMLElement) {
   const below = el.scrollHeight - el.clientHeight - el.scrollTop;
   el.dataset.fadeTop = String(el.scrollTop > 1);
   el.dataset.fadeBottom = String(below > 1);
-}
-
-/** The live ticker shares the identity line instead of adding a work row. */
-function MonoTurnHeader({
-  blocks,
-  title,
-  name,
-  harness,
-  agentMascot,
-  active,
-  live,
-  waitingForAnswers,
-  backgroundTasks,
-  onShowWork,
-  workExpanded,
-  searchCurrent,
-}: {
-  blocks: Block[];
-  title: ReactNode;
-  name?: string;
-  harness?: HarnessId;
-  agentMascot?: Props["agentMascot"];
-  active: boolean;
-  live: boolean;
-  waitingForAnswers: boolean;
-  backgroundTasks?: string[];
-  onShowWork?: () => void;
-  workExpanded?: boolean;
-  searchCurrent: boolean;
-}) {
-  const activity = useMemo(
-    () => blocks.filter((block) => !block.internal && !block.draft),
-    [blocks],
-  );
-  let status = useMemo(
-    () => monoWorkStatus(activity, active),
-    [activity, active],
-  );
-  if (active && waitingForAnswers && !activity.some(needsApproval)) {
-    status = { ...status, key: "question", label: "Waiting for answers…" };
-  } else if (active && backgroundTasks?.length && status.kind === "think") {
-    status = {
-      ...status,
-      key: "background",
-      label:
-        backgroundTasks.length === 1
-          ? "Waiting for background task…"
-          : `Waiting for ${backgroundTasks.length} background tasks…`,
-    };
-  }
-  const mark = agentMascot ? (
-    <PixelMascot
-      name={agentMascot.mascot}
-      color={agentMascot.color}
-      still
-      className="size-3.5 shrink-0"
-    />
-  ) : harness ? (
-    <HarnessIcon harness={harness} className="size-3.5 shrink-0" />
-  ) : (
-    <ActivityPhaseIcon kind={status.kind} />
-  );
-  const ticker = (
-    <MonoWorkTicker status={{ ...status, active: live }} showIcon={false} />
-  );
-  return (
-    <div
-      data-mono-work
-      data-transcript-search-item
-      data-transcript-search-current={searchCurrent || undefined}
-      className="flex min-w-0 items-center gap-1.5 px-4 py-1 font-sans text-sm text-content/50"
-    >
-      {active ? (
-        <>
-          {agentMascot ? (
-            // The pill holds the Mono's signature from the first token on;
-            // the ticker runs beside it.
-            <>
-              <span className="max-w-[45%] shrink-0">
-                <MonoSignaturePill>
-                  {mark}
-                  {name ? (
-                    <span className="min-w-0 truncate font-medium text-content/80">
-                      {name}
-                    </span>
-                  ) : null}
-                </MonoSignaturePill>
-              </span>
-              <span aria-hidden className="shrink-0 text-content/25">
-                ·
-              </span>
-            </>
-          ) : (
-            <>
-              {mark}
-              {name ? (
-                <>
-                  <span className="max-w-[45%] truncate">{name}</span>
-                  <span aria-hidden className="shrink-0 text-content/25">
-                    ·
-                  </span>
-                </>
-              ) : null}
-            </>
-          )}
-          {onShowWork ? (
-            <button
-              type="button"
-              title={workExpanded ? "Hide activity" : "Show activity"}
-              aria-label={workExpanded ? "Hide activity" : "Show activity"}
-              aria-expanded={!!workExpanded}
-              onClick={onShowWork}
-              className="min-w-0 flex-1 cursor-pointer text-left outline-none transition-opacity duration-150 hover:opacity-70 focus-visible:opacity-70"
-            >
-              {ticker}
-            </button>
-          ) : (
-            <div className="min-w-0 flex-1">{ticker}</div>
-          )}
-        </>
-      ) : agentMascot ? (
-        <MonoSignaturePill>
-          {mark}
-          <span className="min-w-0 truncate">{title}</span>
-        </MonoSignaturePill>
-      ) : (
-        <>
-          {mark}
-          <span className="min-w-0 truncate">{title}</span>
-        </>
-      )}
-    </div>
-  );
-}
-
-type MonoWorkApprovalsProps = Pick<
-  ActivityPhasesProps,
-  "blocks" | "cwd" | "onApproval" | "onOpenFile" | "onOpenDiff"
->;
-
-/** Pending approvals stay actionable while the rest of the work is hidden. */
-const MonoWorkApprovals = memo(function MonoWorkApprovals({
-  blocks,
-  cwd,
-  onApproval,
-  onOpenFile,
-  onOpenDiff,
-}: MonoWorkApprovalsProps) {
-  return (
-    <div className="flex min-w-0 flex-col px-4">
-      {blocks.filter(needsApproval).map((block) => (
-        <ToolCall
-          key={block.id}
-          block={block}
-          cwd={cwd}
-          embedded
-          onApproval={onApproval}
-          onOpenFile={onOpenFile}
-          onOpenDiff={onOpenDiff}
-        />
-      ))}
-    </div>
-  );
-}, sameActivity);
-
-/** Full turn activity in transcript order, without the chat's work folding. */
-export function MonoActivityTrail({
-  blocks,
-  live = false,
-  cwd,
-  onApproval,
-  onOpenFile,
-  onOpenDiff,
-}: Omit<ActivityPhasesProps, "done" | "padded"> & { live?: boolean }) {
-  const steps = blocks.filter(
-    (block) =>
-      !block.internal &&
-      !block.draft &&
-      block.role !== "user" &&
-      block.role !== "handoff" &&
-      (block.text.trim() ||
-        block.tool ||
-        block.image ||
-        block.taskList ||
-        block.plan),
-  );
-  // What it said reads as text; the work between hangs on a short timeline.
-  const segments: { prose: boolean; blocks: Block[] }[] = [];
-  for (const block of steps) {
-    const prose = isProseBlock(block);
-    const last = segments[segments.length - 1];
-    if (last && !prose && !last.prose) last.blocks.push(block);
-    else segments.push({ prose, blocks: [block] });
-  }
-  return (
-    <ol
-      aria-label="Activity in chronological order"
-      className="flex min-w-0 flex-col gap-3"
-    >
-      {segments.map((segment) => {
-        const first = segment.blocks[0];
-        if (segment.prose)
-          return (
-            <li
-              key={first.id}
-              data-mono-activity-block={first.id}
-              className="mono-activity-prose min-w-0 px-1 text-content/80"
-            >
-              <AgentMarkdown
-                text={first.text}
-                cwd={cwd}
-                onOpenFile={onOpenFile}
-                className="mono-run-report"
-              />
-            </li>
-          );
-        return (
-          <li
-            key={first.id}
-            className="mono-activity-steps flex min-w-0 flex-col px-1"
-          >
-            {segment.blocks.map((block, step) => (
-              <div
-                key={block.id}
-                data-mono-activity-block={block.id}
-                className="relative min-w-0 pl-4"
-              >
-                {/* The rail runs between the steps' dots, not past the ends. */}
-                <span
-                  aria-hidden="true"
-                  className={`absolute left-[2.5px] w-px bg-content/12 ${
-                    step === 0 ? "top-[13px]" : "top-0"
-                  } ${
-                    step === segment.blocks.length - 1 ? "h-[13px]" : "bottom-0"
-                  } ${segment.blocks.length === 1 ? "hidden" : ""}`}
-                />
-                <span
-                  aria-hidden="true"
-                  className="absolute left-0 top-[10px] size-1.5 rounded-full bg-content/25"
-                />
-                {block.role === "plan" ||
-                block.role === "tasks" ||
-                block.role === "image" ? (
-                  <TranscriptBlock
-                    block={block}
-                    layout="full"
-                    stickyIndex={steps.indexOf(block)}
-                    embedded
-                    cwd={cwd}
-                  />
-                ) : (
-                  <ActivityRow
-                    block={block}
-                    live={live}
-                    cwd={cwd}
-                    onApproval={onApproval}
-                    onOpenFile={onOpenFile}
-                    onOpenDiff={onOpenDiff}
-                  />
-                )}
-              </div>
-            ))}
-          </li>
-        );
-      })}
-    </ol>
-  );
 }
 
 /**
@@ -5291,52 +4557,6 @@ function turnUserBlock(blocks: Block[], managed = false): Block | undefined {
     if (block.role === "user" && (managed || !block.internal)) return block;
   }
   return undefined;
-}
-
-/**
- * Whether a Mono turn that ended in only a reaction stacks into the next
- * one: the next turn opens with a message of the user's own, in the same
- * stretch of time.
- */
-function stacksAfterReaction(
-  turn: Block[],
-  next: Block[] | undefined,
-  daySeparators: boolean,
-): boolean {
-  const start = next?.[0];
-  return (
-    !!start &&
-    turn.some((block) => !!block.monoReaction) &&
-    start.role === "user" &&
-    !start.internal &&
-    !start.monoHabit &&
-    !(
-      daySeparators &&
-      start.startedAt != null &&
-      opensNewStretch(start.startedAt, monoTurnLatestStart(turn))
-    )
-  );
-}
-
-function monoTurnUserBlock(
-  blocks: Block[],
-  deliveries?: ReadonlyMap<string, MessageDelivery>,
-): Block | undefined {
-  for (let index = blocks.length - 1; index >= 0; index--) {
-    const block = blocks[index];
-    if (
-      block.role === "user" &&
-      block.startedAt != null &&
-      !deliveries?.has(block.id)
-    )
-      return block;
-  }
-  return blocks.find((block) => block.role === "user");
-}
-
-function sumDurations(durations: (number | undefined)[]): number | undefined {
-  const known = durations.filter((ms): ms is number => ms != null);
-  return known.length ? known.reduce((total, ms) => total + ms, 0) : undefined;
 }
 
 function userTurnCount(blocks: Block[], managed = false): number {

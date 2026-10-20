@@ -120,7 +120,7 @@ describe("canSteerQueuedHead", () => {
     ).toBe(false);
   });
 
-  it.each(["plan", "orchestrate"] as const)(
+  it.each(["plan"] as const)(
     "waits for an idle turn for %s",
     (intent) => {
       expect(
