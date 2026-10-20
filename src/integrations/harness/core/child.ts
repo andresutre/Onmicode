@@ -321,7 +321,7 @@ export async function spawnChild(
   command: string,
   args: string[],
   cwd: string,
-  account?: { provider: "claude" | "codex"; id: string },
+  account?: { provider: "claude" | "codex" | "pi"; id: string },
   binaryProvider?: ConfigurableBinaryProvider,
   /** `devin acp` only: start with an approval rule for every edit. */
   devinAskEdits?: boolean,

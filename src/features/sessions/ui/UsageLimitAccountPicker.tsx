@@ -13,7 +13,7 @@ import {
   providerAccounts,
   sameProviderAccountId,
   subscribeProviderAccounts,
-  supportsProviderAccounts,
+  accountProviderFor,
   type ProviderAccount,
 } from "../../providers/model/providerAccounts";
 
@@ -31,10 +31,10 @@ export function UsageLimitAccountPicker({
 }) {
   const snapshot = useSyncExternalStore(
     subscribeProviderAccounts,
-    () =>
-      supportsProviderAccounts(harness)
-        ? JSON.stringify(providerAccounts(harness))
-        : "[]",
+    () => {
+      const provider = accountProviderFor(harness);
+      return provider ? JSON.stringify(providerAccounts(provider)) : "[]";
+    },
     () => "[]",
   );
   const accounts = (JSON.parse(snapshot) as ProviderAccount[]).filter(

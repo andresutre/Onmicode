@@ -244,8 +244,10 @@ export function UsageChips({
   const [piRefreshKey, setPiRefreshKey] = useState(0);
   const [, setAccountsVersion] = useState(0);
   const inflight = useRef<Promise<void> | null>(null);
+  // A Pi session signs in to Claude too, so its account is a Claude one.
   const claudeAccountId =
-    session?.harness === "claude" && session.providerAccountId
+    (session?.harness === "claude" || session?.harness === "pi") &&
+    session.providerAccountId
       ? session.providerAccountId
       : selectedProviderAccountId("claude", project);
   const codexAccountId =
@@ -496,7 +498,7 @@ export function UsageChips({
     : {};
 
   const lead =
-    session?.harness === "pi" ? (
+    session?.harness === "pi" && !primary.includes("claude") ? (
       <PiUsage
         key={`${session.id}:${session.model}`}
         model={session.model}

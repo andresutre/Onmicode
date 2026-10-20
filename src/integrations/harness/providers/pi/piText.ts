@@ -16,6 +16,8 @@ import {
   isAgentSettled,
   isPiThinkingLevel,
 } from "./piProtocol";
+import { piAccount } from "./piFamily";
+import { sameProviderAccountId } from "../../../../features/providers/model/providerAccounts";
 import { abortTextPromptRace } from "../../core/abortTextPrompt";
 import { mergeStream } from "../../core/streamText";
 import type { HarnessEvent } from "../../core/types";
@@ -26,6 +28,8 @@ const REQUEST_TIMEOUT_MS = 45_000;
 type LiveText = {
   rpc: PiRpc;
   cwd: string;
+  /** The Claude account pi-claude-code signs in with. */
+  providerAccountId?: string;
   model?: string;
   settingsKey: string;
   collecting: boolean;
@@ -93,6 +97,7 @@ export async function runTextPrompt(
   flavor: PiFlavor,
   input: {
     cwd: string;
+    providerAccountId?: string;
     model?: string;
     modelSettings?: Record<string, string>;
     prompt: string;
@@ -116,6 +121,7 @@ async function promptOnLive(
   flavor: PiFlavor,
   input: {
     cwd: string;
+    providerAccountId?: string;
     model?: string;
     modelSettings?: Record<string, string>;
     prompt: string;
@@ -129,6 +135,7 @@ async function promptOnLive(
     input.cwd,
     input.model,
     input.modelSettings,
+    input.providerAccountId,
   );
   const timeoutMs = input.timeoutMs ?? REQUEST_TIMEOUT_MS;
   try {
@@ -212,6 +219,7 @@ async function ensureLive(
   cwd: string,
   requestedModel?: string,
   modelSettings?: Record<string, string>,
+  providerAccountId?: string,
 ): Promise<LiveText> {
   const state = stateFor(flavor);
   const model = pickTextModel(flavor, requestedModel);
@@ -222,12 +230,13 @@ async function ensureLive(
     !current.closed &&
     current.cwd === cwd &&
     current.model === model &&
-    current.settingsKey === settingsKey
+    current.settingsKey === settingsKey &&
+    sameProviderAccountId(current.providerAccountId, providerAccountId)
   ) {
     return current;
   }
   await dropLive(flavor);
-  return startLive(flavor, cwd, model, modelSettings);
+  return startLive(flavor, cwd, model, modelSettings, providerAccountId);
 }
 
 async function startLive(
@@ -235,6 +244,7 @@ async function startLive(
   cwd: string,
   model?: string,
   modelSettings?: Record<string, string>,
+  providerAccountId?: string,
 ): Promise<LiveText> {
   const state = stateFor(flavor);
   const childId = flavor.textChildId;
@@ -251,6 +261,7 @@ async function startLive(
   const session: LiveText = {
     rpc,
     cwd,
+    providerAccountId,
     model,
     settingsKey: modelSettingsKey(modelSettings),
     collecting: false,
@@ -286,7 +297,7 @@ async function startLive(
         model,
       }),
       cwd,
-      undefined,
+      piAccount(flavor, providerAccountId),
       flavor.id,
     );
     await rpc.request({ type: "get_state" }, INIT_TIMEOUT_MS);
@@ -350,6 +361,7 @@ export const stopPiTextPrompt = () => stopTextPrompt(PI_FLAVOR);
 export const warmupPiText = (cwd: string) => warmupText(PI_FLAVOR, cwd);
 export const runPiTextPrompt = (input: {
   cwd: string;
+  providerAccountId?: string;
   model?: string;
   modelSettings?: Record<string, string>;
   prompt: string;

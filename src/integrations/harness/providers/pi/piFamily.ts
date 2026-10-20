@@ -2,6 +2,10 @@ import { TurnNotReadyError } from "../../core/types";
 import { nativeModelId } from "../../../../features/sessions/model/models";
 import { taskListFromToolInput } from "../../../../features/sessions/model/taskList";
 import { normalizeProjectPath } from "../../../../features/projects/model/recents";
+import {
+  DEFAULT_PROVIDER_ACCOUNT_ID,
+  sameProviderAccountId,
+} from "../../../../features/providers/model/providerAccounts";
 import type {
   UserQuestion,
   UserQuestionReply,
@@ -99,6 +103,11 @@ type InFlightTool = {
 type Live = {
   rpc: PiRpc;
   cwd: string;
+  /**
+   * The Claude account pi-claude-code signs in with. Pi keeps its sessions
+   * in its own folder whatever the account, so a switch only restarts Pi.
+   */
+  providerAccountId?: string;
   providerSessionId: string;
   contextWindow?: number;
   nativeModel: string;
@@ -171,6 +180,18 @@ type Resume = {
   sessionId: string;
   cwd: string;
 };
+
+/** The spawn account for a Pi child, signed in through a Claude profile. */
+export function piAccount(
+  flavor: PiFlavor,
+  providerAccountId: string | undefined,
+): { provider: "pi"; id: string } | undefined {
+  return flavor.id === "pi" &&
+    providerAccountId &&
+    providerAccountId !== DEFAULT_PROVIDER_ACCOUNT_ID
+    ? { provider: "pi", id: providerAccountId }
+    : undefined;
+}
 
 const INIT_TIMEOUT_MS = 45_000;
 const STATS_TIMEOUT_MS = 4_000;
@@ -502,7 +523,8 @@ async function ensureLive(
   if (
     existing &&
     existing.cwd === input.cwd &&
-    existing.planning === wantPlanning
+    existing.planning === wantPlanning &&
+    sameProviderAccountId(existing.providerAccountId, input.providerAccountId)
   ) {
     existing.onEvent = input.onEvent;
     await applyModel(flavor, existing, input);
@@ -558,6 +580,7 @@ async function startLive(
   const live: Live = {
     rpc,
     cwd: input.cwd,
+    providerAccountId: input.providerAccountId,
     providerSessionId: resume ?? "",
     nativeModel: native,
     thinking: input.modelSettings?.thinking ?? "",
@@ -631,7 +654,7 @@ async function startLive(
       plan: input.intent === "plan",
     }),
     input.cwd,
-    undefined,
+    piAccount(flavor, input.providerAccountId),
     flavor.id,
   );
 

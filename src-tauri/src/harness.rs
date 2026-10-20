@@ -289,7 +289,8 @@ impl HarnessHost {
                 .iter()
                 .filter_map(|(session_id, live)| {
                     let account = live.account.as_ref()?;
-                    (account.provider == provider && account.id == account_id)
+                    (account_home_provider(&account.provider) == provider
+                        && account.id == account_id)
                         .then(|| session_id.clone())
                 })
                 .collect();
@@ -1133,6 +1134,15 @@ pub fn provider_account_remove(
     })
 }
 
+/// Pi has no logins of its own to switch: its profiles are Claude's.
+fn account_home_provider(provider: &str) -> &str {
+    if provider == "pi" {
+        "claude"
+    } else {
+        provider
+    }
+}
+
 fn apply_provider_account(
     app: &AppHandle,
     cmd: &mut Command,
@@ -1141,10 +1151,24 @@ fn apply_provider_account(
     let Some(account) = account else {
         return Ok(());
     };
-    let Some(dir) = provider_account_dir(app, &account.provider, Some(&account.id))? else {
+    let Some(dir) = provider_account_dir(
+        app,
+        account_home_provider(&account.provider),
+        Some(&account.id),
+    )?
+    else {
         return Ok(());
     };
     match account.provider.as_str() {
+        "pi" => {
+            // Pi signs in to Claude through the pi-claude-code extension, which
+            // runs the Claude CLI under PI_CLAUDE_CODE_CONFIG_DIR. Claude's own
+            // variables reach that CLI too, for the macOS Keychain scope. Pi's
+            // other providers keep their keys: only the Claude login changes.
+            cmd.env("PI_CLAUDE_CODE_CONFIG_DIR", &dir)
+                .env("CLAUDE_CONFIG_DIR", &dir)
+                .env("CLAUDE_SECURESTORAGE_CONFIG_DIR", &dir);
+        }
         "claude" => {
             // Claude scopes both its ordinary config and its macOS Keychain
             // credential to these exact strings. Setting both keeps profiles

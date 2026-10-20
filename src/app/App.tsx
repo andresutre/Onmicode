@@ -418,7 +418,7 @@ import {
   providerAccountExists,
   sameProviderAccountId,
   selectedProviderAccountId,
-  supportsProviderAccounts,
+  accountProviderFor,
   type ProviderAccountProvider,
 } from "../features/providers/model/providerAccounts";
 import {
@@ -1853,12 +1853,12 @@ function Workspace({
 
   const usageSource = active;
   const usageProviders = useMemo(
-    () => usageProvidersFor(usageSource?.harness),
-    [usageSource?.harness],
+    () => usageProvidersFor(usageSource?.harness, usageSource?.model),
+    [usageSource?.harness, usageSource?.model],
   );
   const otherUsageProviders = useMemo(
-    () => otherUsageProvidersFor(usageSource?.harness),
-    [usageSource?.harness],
+    () => otherUsageProvidersFor(usageSource?.harness, usageSource?.model),
+    [usageSource?.harness, usageSource?.model],
   );
   const usageSession = useMemo(() => {
     if (!usageSource) return undefined;
@@ -2479,7 +2479,8 @@ function Workspace({
       const current = sessionsRef.current.find(
         (session) => session.id === active?.id,
       );
-      if (!current || current.harness !== provider) return;
+      if (!current || accountProviderFor(current.harness) !== provider)
+        return;
 
       // A limited session continues in place under the selected account.
       if (current.usageLimit && !current.busy) {
@@ -2487,7 +2488,12 @@ function Workspace({
         return;
       }
 
-      if (current.blocks.length === 0 && !current.busy) {
+      // Pi keeps its conversation whichever Claude login it uses, so the same
+      // conversation goes on under the other account from its next turn.
+      if (
+        (current.blocks.length === 0 || current.harness === "pi") &&
+        !current.busy
+      ) {
         if (current.providerAccountId === accountId) return;
         updateSessionState(sessionsRef, setSessions, (sessions) =>
           sessions.map((session) =>
@@ -6481,9 +6487,7 @@ function Workspace({
       const initialWorkCwd = sessionWorkCwd(current);
       const createDraftWorktree =
         !current.worktreeCwd && current.workspaceMode === "worktree";
-      const accountProvider = supportsProviderAccounts(current.harness)
-        ? current.harness
-        : undefined;
+      const accountProvider = accountProviderFor(current.harness);
       const providerAccountId = accountProvider
         ? (current.providerAccountId ??
           selectedProviderAccountId(accountProvider, current.cwd))
@@ -8155,15 +8159,19 @@ function Workspace({
       if (
         !session?.usageLimit ||
         session.busy ||
-        !supportsProviderAccounts(session.harness) ||
-        !providerAccountExists(session.harness, accountId) ||
+        !accountProviderFor(session.harness) ||
+        !providerAccountExists(
+          accountProviderFor(session.harness)!,
+          accountId,
+        ) ||
         sameProviderAccountId(session.providerAccountId, accountId) ||
         usageLimitSwitching.current.has(sessionId)
       )
         return;
       // Copy the native transcript so the other account resumes the very same
-      // provider session.
-      let carried = false;
+      // provider session. Pi keeps its sessions apart from the Claude login
+      // it switches, so its conversation carries over as it is.
+      let carried = session.harness === "pi" && !!session.providerSessionId;
       if (
         session.providerSessionId &&
         (session.harness === "claude" || session.harness === "codex")
@@ -9062,9 +9070,12 @@ function Workspace({
             cwd: workCwd,
             model: current.model,
             modelSettings: current.modelSettings,
-            providerAccountId: supportsProviderAccounts(current.harness)
+            providerAccountId: accountProviderFor(current.harness)
               ? (current.providerAccountId ??
-                selectedProviderAccountId(current.harness, current.cwd))
+                selectedProviderAccountId(
+                  accountProviderFor(current.harness)!,
+                  current.cwd,
+                ))
               : undefined,
             runtimeMode: current.runtimeMode,
             ephemeral: current.ephemeral === true,

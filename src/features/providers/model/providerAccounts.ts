@@ -36,6 +36,18 @@ export function supportsProviderAccounts(
 }
 
 /**
+ * Whose accounts a harness signs in with. Pi reaches Claude through the
+ * pi-claude-code extension, which runs the Claude CLI, so a Pi session picks
+ * from the Claude accounts and its account id is a Claude one.
+ */
+export function accountProviderFor(
+  harness: HarnessId | undefined,
+): ProviderAccountProvider | undefined {
+  if (harness === "pi") return "claude";
+  return harness && supportsProviderAccounts(harness) ? harness : undefined;
+}
+
+/**
  * Providers whose CLIs can keep isolated, locally named profiles. Devin has
  * no config-dir override on Windows, so it offers only its default login.
  */
