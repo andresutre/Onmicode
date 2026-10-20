@@ -3,6 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 
 const rateLimitsFetch = vi.hoisted(() => ({
   consumeCodexRateLimitResetCredit: vi.fn(),
@@ -142,6 +143,41 @@ describe("UsageFooter beside the session's own provider", () => {
       "Claude Code usage details",
       "Codex usage details",
     ]);
+  });
+
+  it("refreshes Pi and the others from one button", async () => {
+    await renderFor("pi", "pi:anthropic/claude-sonnet-4-6");
+    const piFetches = () =>
+      vi
+        .mocked(invoke)
+        .mock.calls.filter(([command]) => command === "fetch_pi_usage").length;
+    const before = piFetches();
+
+    expect(
+      container.querySelector('[aria-label="Refresh Pi usage"]'),
+    ).toBeNull();
+    const refresh = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Refresh usage"]',
+    );
+    await act(async () => refresh?.click());
+
+    expect(piFetches()).toBe(before + 1);
+    expect(rateLimitsFetch.fetchClaudeRateLimits).toHaveBeenCalledTimes(2);
+    expect(rateLimitsFetch.fetchCodexRateLimits).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves Pi its own refresh when nothing sits beside it", async () => {
+    rateLimitsFetch.fetchClaudeRateLimits.mockResolvedValue(
+      signedOut("claude"),
+    );
+    rateLimitsFetch.fetchCodexRateLimits.mockResolvedValue(signedOut("codex"));
+    await renderFor("pi", "pi:anthropic/claude-sonnet-4-6");
+
+    expect(chipLabels()).toEqual(["Pi · Anthropic usage details"]);
+    expect(
+      container.querySelector('[aria-label="Refresh Pi usage"]'),
+    ).not.toBeNull();
+    expect(container.querySelector('[aria-label="Refresh usage"]')).toBeNull();
   });
 
   it("leads with the session's provider in full and the others compact", async () => {

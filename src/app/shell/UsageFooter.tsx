@@ -241,6 +241,7 @@ export function UsageChips({
   const wantDevin = wanted.includes("devin");
   const [now, setNow] = useState(() => Date.now());
   const [refreshing, setRefreshing] = useState(false);
+  const [piRefreshKey, setPiRefreshKey] = useState(0);
   const [, setAccountsVersion] = useState(0);
   const inflight = useRef<Promise<void> | null>(null);
   const claudeAccountId =
@@ -301,9 +302,12 @@ export function UsageChips({
     wantDevin,
   ]);
 
+  const refreshPi = session?.harness === "pi";
   const refresh = useCallback(() => {
     if (inflight.current) return inflight.current;
     setRefreshing(true);
+    // Pi's chip gives up its own button while this one is beside it.
+    if (refreshPi) setPiRefreshKey((key) => key + 1);
     const jobs: Promise<unknown>[] = [];
     if (wantClaude && claudeAccountAvailable)
       jobs.push(loadRateLimits("claude", claudeAccountId, true));
@@ -324,6 +328,7 @@ export function UsageChips({
     claudeAccountId,
     codexAccountAvailable,
     codexAccountId,
+    refreshPi,
     wantClaude,
     wantCodex,
     wantOpencode,
@@ -497,6 +502,8 @@ export function UsageChips({
         model={session.model}
         now={now}
         variant={variant}
+        refreshKey={piRefreshKey}
+        showRefresh={others.length === 0}
       />
     ) : primary.length > 0 ? null : (
       sessionChip
