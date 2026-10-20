@@ -224,14 +224,24 @@ export function runRowStatus(state: string): string {
   return state === "complete" || state === "completed" ? "completed" : "failed";
 }
 
+export type PiBackgroundSnapshot = {
+  runs: PiBackgroundRun[];
+  /**
+   * Every run in the session is listed. pi-subagents caps the snapshot (20
+   * runs, 32 KB) and counts what it left out; a run missing from a partial
+   * snapshot may still be going.
+   */
+  complete: boolean;
+};
+
 /**
  * pi-subagents reports its background runs through a `subagent-async` widget
- * whose line is a JSON snapshot of every run in the session. Returns null for
- * any other frame, and an empty list once the widget is cleared.
+ * whose line is a JSON snapshot of the session's runs. Returns null for any
+ * other frame, and no runs once the widget is cleared.
  */
 export function piBackgroundRunsFromFrame(
   rec: Record<string, unknown>,
-): PiBackgroundRun[] | null {
+): PiBackgroundSnapshot | null {
   if (
     rec.type !== "extension_ui_request" ||
     rec.method !== "setWidget" ||
@@ -244,7 +254,7 @@ export function piBackgroundRunsFromFrame(
           typeof item === "string" && item.startsWith(ASYNC_WIDGET_PREFIX),
       )
     : undefined;
-  if (!line) return [];
+  if (!line) return { runs: [], complete: true };
   let snapshot: Record<string, unknown> | null;
   try {
     snapshot = asRecord(JSON.parse(line.slice(ASYNC_WIDGET_PREFIX.length)));
@@ -252,7 +262,12 @@ export function piBackgroundRunsFromFrame(
     return null;
   }
   if (!snapshot || !Array.isArray(snapshot.runs)) return null;
-  return records(snapshot.runs).flatMap<PiBackgroundRun>((run) => {
+  const omitted = asRecord(snapshot.omitted);
+  // Missing counts are read as nothing omitted, as before they existed.
+  const complete =
+    !(typeof omitted?.runs === "number" && omitted.runs > 0) &&
+    omitted?.byteLimitExceeded !== true;
+  const runs = records(snapshot.runs).flatMap<PiBackgroundRun>((run) => {
     const id = stringField(run, "id");
     const state = stringField(run, "state");
     if (!id || !state) return [];
@@ -272,6 +287,7 @@ export function piBackgroundRunsFromFrame(
       },
     ];
   });
+  return { runs, complete };
 }
 
 /** The run id a detached `subagent` launch returned, if it detached. */

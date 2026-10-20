@@ -34,7 +34,7 @@ import {
   piSubagentEvents,
   piSubagentNotice,
   runRowStatus,
-  type PiBackgroundRun,
+  type PiBackgroundSnapshot,
 } from "./piSubagents";
 import {
   addPiTurnUsage,
@@ -914,8 +914,11 @@ function noteBackgroundLaunch(
   backgroundRowStatus(live, run, "in_progress");
 }
 
-/** pi-subagents' status snapshot of every background run in the session. */
-function noteBackgroundSnapshot(live: Live, runs: PiBackgroundRun[]): void {
+/** pi-subagents' status snapshot of the session's background runs. */
+function noteBackgroundSnapshot(
+  live: Live,
+  { runs, complete }: PiBackgroundSnapshot,
+): void {
   const seen = new Set<string>();
   for (const snapshot of runs) {
     seen.add(snapshot.id);
@@ -936,10 +939,14 @@ function noteBackgroundSnapshot(live: Live, runs: PiBackgroundRun[]): void {
       snapshot.model ? { agentModel: snapshot.model } : {},
     );
   }
-  // A run the widget showed and no longer does has ended.
-  for (const [id, run] of [...live.backgroundRuns]) {
-    if (run.reported && !seen.has(id))
-      finishBackgroundRun(live, id, "complete");
+  // A run the widget showed and no longer does has ended, unless the widget
+  // left runs out: then it may only have been crowded off the list. Its
+  // completion notice still ends it.
+  if (complete) {
+    for (const [id, run] of [...live.backgroundRuns]) {
+      if (run.reported && !seen.has(id))
+        finishBackgroundRun(live, id, "complete");
+    }
   }
   syncBackgroundWait(live);
 }

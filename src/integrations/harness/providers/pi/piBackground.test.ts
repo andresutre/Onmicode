@@ -62,7 +62,10 @@ function prompts() {
 }
 
 /** pi-subagents' status widget, as Pi 1.3.0 sent it over RPC. */
-function asyncWidget(state?: string) {
+function asyncWidget(
+  state?: string,
+  snapshot: { runs?: Array<Record<string, unknown>>; omitted?: unknown } = {},
+) {
   return {
     type: "extension_ui_request",
     id: crypto.randomUUID(),
@@ -74,7 +77,8 @@ function asyncWidget(state?: string) {
             `PI_SUBAGENT_ASYNC_JSON:${JSON.stringify({
               kind: "pi-subagents.async-status-snapshot",
               version: 1,
-              runs: [
+              ...(snapshot.omitted ? { omitted: snapshot.omitted } : {}),
+              runs: snapshot.runs ?? [
                 {
                   id: RUN,
                   kind: "subagent",
@@ -218,6 +222,70 @@ describe("Pi background subagents", () => {
     await vi.advanceTimersByTimeAsync(14_000);
     expect(running.settled()).toBe(false);
     await vi.advanceTimersByTimeAsync(2_000);
+    vi.useRealTimers();
+    await running.turn;
+  });
+
+  it("keeps waiting on a run a capped snapshot left out", async () => {
+    const running = await start();
+    detachAndYield();
+    vi.useFakeTimers();
+    // More runs than the widget lists: ours was crowded off, not finished.
+    const crowded = {
+      runs: [
+        {
+          id: "other-run",
+          kind: "subagent",
+          label: "worker",
+          state: "running",
+        },
+      ],
+    };
+    frame(
+      asyncWidget("running", {
+        ...crowded,
+        omitted: { runs: 1, children: 0, byteLimitExceeded: false },
+      }),
+    );
+    frame(
+      asyncWidget("running", {
+        ...crowded,
+        omitted: { runs: 0, children: 0, byteLimitExceeded: true },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(running.settled()).toBe(false);
+    const session = events.reduce(applyHarnessEvent, newSession("pi", "/repo"));
+    expect(
+      session.blocks.find((block) => block.tool?.callId === "call-1")?.tool
+        ?.status,
+    ).toBe("in_progress");
+    expect(session.backgroundTasks).toEqual(["scout", "worker"]);
+
+    // Its own notice still ends it.
+    completionNotice();
+    frame(asyncWidget("running", crowded));
+    frame(asyncWidget());
+    await vi.advanceTimersByTimeAsync(16_000);
+    vi.useRealTimers();
+    await running.turn;
+  });
+
+  it("ends a run a complete snapshot no longer lists", async () => {
+    const running = await start();
+    detachAndYield();
+    vi.useFakeTimers();
+    frame(
+      asyncWidget("running", {
+        runs: [],
+        omitted: { runs: 0, children: 0, byteLimitExceeded: false },
+      }),
+    );
+    const row = events
+      .reduce(applyHarnessEvent, newSession("pi", "/repo"))
+      .blocks.find((block) => block.tool?.callId === "call-1");
+    expect(row?.tool?.status).toBe("completed");
+    await vi.advanceTimersByTimeAsync(16_000);
     vi.useRealTimers();
     await running.turn;
   });
