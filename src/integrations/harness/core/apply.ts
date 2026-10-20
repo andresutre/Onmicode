@@ -23,6 +23,10 @@ import { isReviewablePlan } from "../../../features/sessions/model/plan";
 import { resolveModel } from "../../../features/sessions/model/models";
 import type { HarnessEvent } from "./types";
 import { usageLimitFromError } from "../../../features/sessions/model/usageLimit";
+import {
+  answeredQuestions,
+  answeredQuestionsText,
+} from "../../../features/sessions/model/userQuestion";
 
 /** Apply one delivery batch without copying the transcript for every token. */
 export function applyHarnessEvents(
@@ -133,7 +137,7 @@ export function applyHarnessEvent(
         : session;
     case "question.resolved":
       return session.pendingQuestion?.requestId === event.requestId
-        ? { ...session, pendingQuestion: undefined }
+        ? resolveQuestion(session, event)
         : session;
     case "context":
       return {
@@ -776,6 +780,26 @@ function appendImage(
       size: event.size,
       ...(event.alt ? { alt: event.alt } : {}),
     },
+  });
+}
+
+/** The prompt leaves the composer; what the user answered stays in the transcript. */
+function resolveQuestion(
+  session: Session,
+  event: Extract<HarnessEvent, { type: "question.resolved" }>,
+): Session {
+  const questions = session.pendingQuestion?.questions ?? [];
+  const cleared = { ...session, pendingQuestion: undefined };
+  const answered =
+    event.decision === "answered" && event.reply
+      ? answeredQuestions(questions, event.reply)
+      : [];
+  if (answered.length === 0) return cleared;
+  return appendBlock(cleared, {
+    id: crypto.randomUUID(),
+    role: "question",
+    text: answeredQuestionsText(answered),
+    answeredQuestions: answered,
   });
 }
 

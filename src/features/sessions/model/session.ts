@@ -1,5 +1,5 @@
 import { dropContextWindow, type ContextUsage } from "./contextUsage";
-import type { UserQuestionPrompt } from "./userQuestion";
+import type { AnsweredQuestion, UserQuestionPrompt } from "./userQuestion";
 import type { HandoffComposerCard } from "./handoff";
 import type { InboxComposerCard } from "../../inbox/model/githubTasks";
 import type { InboxAskContext } from "../../inbox/model/inboxAsk";
@@ -51,7 +51,8 @@ export type BlockRole =
   | "tasks"
   | "plan"
   | "system"
-  | "handoff";
+  | "handoff"
+  | "question";
 
 export type TaskListItemStatus =
   "pending" | "in_progress" | "completed" | "cancelled";
@@ -361,6 +362,8 @@ export type Block = {
    */
   notice?: "error" | "interrupt";
   statusKey?: string;
+  /** What the user answered when the agent asked; question blocks only. */
+  answeredQuestions?: AnsweredQuestion[];
 };
 
 export type RuntimeMode =
@@ -524,6 +527,11 @@ export const HARNESS_TITLE: Record<HarnessId, string> = {
 /** fx ACP rejects attachment prompt blocks. */
 export function harnessSupportsAttachments(id: HarnessId): boolean {
   return id !== "fx";
+}
+
+/** Cursor answers a question with option ids alone, leaving a file nowhere to go. */
+export function harnessSupportsQuestionAttachments(id: HarnessId): boolean {
+  return id !== "cursor" && harnessSupportsAttachments(id);
 }
 
 export function newSession(

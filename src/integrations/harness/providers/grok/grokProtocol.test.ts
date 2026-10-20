@@ -357,6 +357,44 @@ describe("grok protocol", () => {
     });
   });
 
+  it("answers with attached files as paths, in a list or below the text", () => {
+    const questions = askQuestionsFromAcp({
+      questions: [
+        { question: "Which colour?", options: [{ label: "Red" }] },
+        {
+          question: "Which sizes?",
+          multiSelect: true,
+          options: [{ label: "S" }, { label: "M" }],
+        },
+      ],
+    });
+    const file = {
+      id: "ref",
+      name: "ref.png",
+      mimeType: "image/png",
+      kind: "image" as const,
+      size: 4,
+      path: "/tmp/ref.png",
+    };
+    const line = 'Attached file (read from disk): "/tmp/ref.png"';
+    expect(
+      askQuestionResponse(
+        {
+          kind: "answered",
+          answers: { "Which colour?": ["Red"], "Which sizes?": ["S", "M"] },
+          attachments: { "Which colour?": [file], "Which sizes?": [file] },
+        },
+        questions,
+      ),
+    ).toEqual({
+      outcome: "accepted",
+      answers: {
+        "Which colour?": `Red\n\n${line}`,
+        "Which sizes?": ["S", "M", line],
+      },
+    });
+  });
+
   it("extracts plan text from exit_plan_mode", () => {
     expect(planFromExitPlan({ planContent: "Ship it" })).toBe("Ship it");
   });

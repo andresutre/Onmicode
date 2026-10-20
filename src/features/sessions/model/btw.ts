@@ -206,6 +206,7 @@ const SNAPSHOT_ROLES: Record<Block["role"], true | undefined> = {
   tasks: true,
   plan: true,
   tool: true,
+  question: true,
   reasoning: undefined,
   approval: undefined,
   system: undefined,
@@ -223,6 +224,7 @@ const PRIVATE_ROLES: Record<Block["role"], true | undefined> = {
   tasks: undefined,
   plan: undefined,
   tool: undefined,
+  question: undefined,
 };
 
 /** Keep isolated prompts below the context limits of the supported runners. */
@@ -325,7 +327,9 @@ export function serializeBtwBlock(block: Block, cwd?: string): string {
         ? "Assistant"
         : block.role === "tasks"
           ? "Tasks"
-          : "Plan";
+          : block.role === "question"
+            ? "User answered"
+            : "Plan";
   return [`${label}: ${body}`, ...attachments].filter(Boolean).join("\n");
 }
 

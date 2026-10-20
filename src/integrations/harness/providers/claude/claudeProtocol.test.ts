@@ -720,6 +720,38 @@ describe("helpers", () => {
     });
   });
 
+  it("answers AskUserQuestion with attached files as paths Claude can read", () => {
+    const input = {
+      questions: [
+        {
+          question: "Which layout?",
+          options: [{ label: "Grid" }, { label: "List" }],
+        },
+        { question: "Anything else?", options: [] },
+      ],
+    };
+    const shot = {
+      id: "shot",
+      name: "shot.png",
+      mimeType: "image/png",
+      kind: "image" as const,
+      size: 4,
+      path: "/tmp/shot.png",
+      data: "aW1n",
+    };
+    expect(
+      askUserQuestionAllowInput(input, {
+        kind: "answered",
+        answers: { "Which layout?": ["Grid"] },
+        attachments: { "Which layout?": [shot], "Anything else?": [shot] },
+      }).answers,
+    ).toEqual({
+      "Which layout?":
+        'Grid\n\nAttached file (read from disk): "/tmp/shot.png"',
+      "Anything else?": 'Attached file (read from disk): "/tmp/shot.png"',
+    });
+  });
+
   it("drops request lifecycle status pings", () => {
     expect(
       statusTextFromSystem({

@@ -32,6 +32,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { AttachmentChip } from "./AttachmentChip";
+import { QuestionAnswerHistory } from "./QuestionAnswerHistory";
 import { GeneratedImage } from "./GeneratedImage";
 import { MonocodeSparkles } from "./MonocodeSparkles";
 import { PlanStepsBurst } from "./PlanStepsBurst";
@@ -1966,6 +1967,15 @@ const TranscriptBlock = memo(function TranscriptBlock({
 
   if (block.role === "reasoning") {
     return null;
+  }
+
+  if (block.role === "question") {
+    return (
+      <QuestionAnswerHistory
+        questions={block.answeredQuestions ?? []}
+        embedded={embedded}
+      />
+    );
   }
 
   if (block.role === "tasks") {

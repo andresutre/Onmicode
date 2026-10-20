@@ -75,7 +75,11 @@ import type {
   WorkspaceMode,
   ComposerTurnOptions,
 } from "../model/session";
-import { HARNESS_TITLE, harnessSupportsAttachments } from "../model/session";
+import {
+  HARNESS_TITLE,
+  harnessSupportsAttachments,
+  harnessSupportsQuestionAttachments,
+} from "../model/session";
 import type {
   UserQuestionPrompt,
   UserQuestionReply,
@@ -1820,6 +1824,8 @@ export function Composer({
           prompt={question}
           onReply={onQuestionReply}
           onInteraction={onQuestionInteraction}
+          // A host session's answer travels without its files.
+          attachments={!remote && harnessSupportsQuestionAttachments(harness)}
         />
       ) : null}
       {children}

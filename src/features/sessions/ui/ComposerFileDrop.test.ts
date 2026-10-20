@@ -431,3 +431,57 @@ describe("Composer image drops", () => {
     expect(attachmentCount()).toBe(1);
   });
 });
+
+describe("Composer drops while a question is open", () => {
+  const question = {
+    requestId: 1,
+    questions: [
+      {
+        id: "why",
+        prompt: "Why did it fail?",
+        multiSelect: false,
+        allowCustom: true,
+        options: [],
+      },
+    ],
+  };
+
+  function chips(inQuestion: boolean) {
+    return Array.from(
+      container.querySelectorAll('[aria-label^="Remove "]'),
+    ).filter((chip) => !!chip.closest("[data-question-form]") === inQuestion)
+      .length;
+  }
+
+  async function renderWithQuestion() {
+    const session = await render({ question, onQuestionReply: vi.fn() });
+    const form = container.querySelector<HTMLElement>("[data-file-drop-zone]")!;
+    form.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, right: 500, bottom: 100 }) as DOMRect;
+    return { session, form };
+  }
+
+  it("gives files dropped on the question to its answer", async () => {
+    await renderWithQuestion();
+    await nativeDrop(["/project/crash.log"], 50, 50);
+    await vi.waitFor(() => expect(chips(true)).toBe(1));
+    expect(chips(false)).toBe(0);
+
+    await nativeDrop(["/project/notes.md"], 50, 300);
+    await vi.waitFor(() => expect(chips(false)).toBe(1));
+    expect(chips(true)).toBe(1);
+  });
+
+  it("keeps a DOM drop on the question out of the composer", async () => {
+    const { form } = await renderWithQuestion();
+    await act(async () => {
+      domDrag(form, "drop", [
+        Object.assign(new File(["log"], "crash.log"), {
+          path: "/project/crash.log",
+        }),
+      ]);
+    });
+    await vi.waitFor(() => expect(chips(true)).toBe(1));
+    expect(chips(false)).toBe(0);
+  });
+});

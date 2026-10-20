@@ -8,7 +8,10 @@ import type {
   TurnIntent,
   TurnMetrics,
 } from "../../../features/sessions/model/session";
-import type { UserQuestion } from "../../../features/sessions/model/userQuestion";
+import type {
+  UserQuestion,
+  UserQuestionReply,
+} from "../../../features/sessions/model/userQuestion";
 
 export type HarnessEvent =
   | { type: "session.started" }
@@ -131,6 +134,8 @@ export type HarnessEvent =
       type: "question.resolved";
       requestId: number;
       decision: "answered" | "skipped" | "cancelled";
+      /** What reached the agent, kept in the transcript. Answers only. */
+      reply?: UserQuestionReply;
     }
   | {
       type: "tasks.updated";

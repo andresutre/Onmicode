@@ -834,7 +834,62 @@ describe("codex live turn sequence", () => {
       type: "question.resolved",
       requestId: question.requestId,
       decision: "answered",
+      reply: { kind: "answered", answers: { q1: ["Remote"] } },
     });
+    notify("turn/completed", { turn: { id: "turn_1", status: "completed" } });
+    await turn;
+  });
+
+  it("steers an async answer's files in as image input and paths", async () => {
+    const { events, turn } = await startTurn("codex-live");
+    notifyAsyncQuestion("async_question");
+    const question = events.find((event) => event.type === "question.asked")!;
+    respondCodexQuestion("codex-live", question.requestId, {
+      kind: "answered",
+      answers: {},
+      attachments: {
+        q1: [
+          {
+            id: "shot",
+            name: "shot.png",
+            mimeType: "image/png",
+            kind: "image",
+            size: 4,
+            path: "/tmp/shot.png",
+            data: "aW1n",
+          },
+          {
+            id: "notes",
+            name: "notes.md",
+            mimeType: "text/markdown",
+            kind: "file",
+            size: 4,
+            path: "/repo/notes.md",
+          },
+        ],
+      },
+    });
+    const steer = parse().find((message) => message.method === "turn/steer")!;
+    expect(steer.params).toEqual({
+      threadId: "thr_1",
+      expectedTurnId: "turn_1",
+      input: [
+        {
+          type: "text",
+          text: "Which source?\nAttached: shot.png, notes.md",
+        },
+        { type: "image", url: "data:image/png;base64,aW1n" },
+        {
+          type: "text",
+          text: 'Attached file (read from disk): "/repo/notes.md"',
+        },
+      ],
+    });
+    reply(steer.id as number, {});
+    await waitFor(
+      () => events.some((event) => event.type === "question.resolved"),
+      "async answer acceptance",
+    );
     notify("turn/completed", { turn: { id: "turn_1", status: "completed" } });
     await turn;
   });
@@ -1400,6 +1455,7 @@ describe("codex live turn sequence", () => {
         type: "question.resolved",
         requestId: request.requestId,
         decision: "answered",
+        reply: { kind: "answered", answers: { permission: ["Decline"] } },
       });
       notify("turn/completed", { turn: { id: "turn_1", status: "completed" } });
       await turn;

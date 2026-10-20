@@ -20,9 +20,11 @@ import {
   backfillOmpInterjections,
   ompStatusSplitTexts,
 } from "../model/ompInterjections";
+import type { AnsweredQuestion } from "../model/userQuestion";
 import type {
   AgentRunMeta,
   AgentStep,
+  Attachment,
   Block,
   BtwMessage,
   BtwThread,
@@ -864,7 +866,60 @@ function sanitizeBlock(
       next.notice = block.notice;
     }
   }
+  if (block.role === "question") {
+    const answered = sanitizeAnsweredQuestions(block.answeredQuestions);
+    if (!answered) return null;
+    next.answeredQuestions = answered;
+  }
   return next;
+}
+
+/** Answers keep their files by path; a preview or bytes do not outlive the app. */
+function sanitizeAnsweredQuestions(
+  value: unknown,
+): AnsweredQuestion[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const questions = value.flatMap((item): AnsweredQuestion[] => {
+    if (!item || typeof item !== "object") return [];
+    const { id, header, prompt, answers, attachments } = item as Record<
+      string,
+      unknown
+    >;
+    if (
+      typeof id !== "string" ||
+      typeof prompt !== "string" ||
+      !Array.isArray(answers)
+    )
+      return [];
+    const files = Array.isArray(attachments)
+      ? attachments.flatMap((file: Partial<Attachment> | null) =>
+          file &&
+          typeof file.id === "string" &&
+          typeof file.name === "string" &&
+          typeof file.mimeType === "string" &&
+          (file.kind === "image" ||
+            file.kind === "audio" ||
+            file.kind === "file") &&
+          typeof file.size === "number" &&
+          Number.isFinite(file.size) &&
+          file.size >= 0
+            ? [persistableAttachment(file as Attachment)]
+            : [],
+        )
+      : [];
+    return [
+      {
+        id,
+        ...(typeof header === "string" && header ? { header } : {}),
+        prompt,
+        answers: answers.filter(
+          (answer): answer is string => typeof answer === "string",
+        ),
+        ...(files.length ? { attachments: files } : {}),
+      },
+    ];
+  });
+  return questions.length ? questions : undefined;
 }
 
 function sanitizeNestedId(value: unknown): string | undefined {

@@ -817,6 +817,45 @@ describe("OMP workflow dialogs", () => {
     },
   );
 
+  it("returns attached files as paths below the typed text", async () => {
+    const running = await started();
+    frame("omp-test", {
+      type: "extension_ui_request",
+      id: "text",
+      method: "input",
+      title: "Instructions",
+    });
+    const question = events.find((e) => e.type === "question.asked");
+    respondQuestion(OMP_FLAVOR, "omp-test", question!.requestId, {
+      kind: "answered",
+      answers: {},
+      attachments: {
+        text: [
+          {
+            id: "spec",
+            name: "spec.pdf",
+            mimeType: "application/pdf",
+            kind: "file",
+            size: 4,
+            path: "/repo/spec.pdf",
+          },
+        ],
+      },
+    });
+    await vi.waitFor(() =>
+      expect(transport.requests.at(-1)?.command).toMatchObject({
+        type: "extension_ui_response",
+        value: 'Attached file (read from disk): "/repo/spec.pdf"',
+      }),
+    );
+    frame("omp-test", {
+      type: "prompt_result",
+      id: running.request.id,
+      agentInvoked: false,
+    });
+    await running.turn;
+  });
+
   it("resolves pending questions when the user stops a command", async () => {
     const running = await started();
     frame("omp-test", {

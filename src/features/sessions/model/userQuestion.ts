@@ -1,5 +1,7 @@
 /** Shared clarifying-question model for every harness that can ask the user. */
 
+import type { Attachment } from "./session";
+
 export const CUSTOM_OPTION_ID = "__custom__";
 
 export type UserQuestionOption = {
@@ -30,8 +32,20 @@ export type UserQuestionReply =
       kind: "answered";
       answers: Record<string, string[]>;
       custom?: Record<string, string>;
+      /** Files attached to each question's answer, by question id. */
+      attachments?: Record<string, Attachment[]>;
     }
   | { kind: "skipped" };
+
+/** One answered question as the transcript keeps it. */
+export type AnsweredQuestion = {
+  id: string;
+  header?: string;
+  prompt: string;
+  /** Chosen options and typed text, as the agent received them. */
+  answers: string[];
+  attachments?: Attachment[];
+};
 
 export function questionsFromUnknown(value: unknown): UserQuestion[] {
   const rec = asRecord(value);
@@ -54,19 +68,34 @@ export function questionPromptTitle(questions: UserQuestion[]): string {
   return first?.header || first?.prompt || "Question";
 }
 
+/**
+ * Files stand in for typed words, so only a question that takes its own answer
+ * can carry them. One limited to its options has nowhere to put a file.
+ */
+export function questionAttachments(
+  question: UserQuestion,
+  attachments: Record<string, Attachment[]> = {},
+): Attachment[] {
+  return question.allowCustom ? (attachments[question.id] ?? []) : [];
+}
+
 export function questionIsComplete(
   question: UserQuestion,
   answers: Record<string, string[]>,
   custom: Record<string, string> = {},
+  attachments: Record<string, Attachment[]> = {},
 ): boolean {
+  const ownAnswer =
+    !!custom[question.id]?.trim() ||
+    questionAttachments(question, attachments).length > 0;
   const selected = answers[question.id] ?? [];
   if (selected.length === 0) {
-    return question.allowCustom && !!custom[question.id]?.trim();
+    return question.allowCustom && ownAnswer;
   }
   if (!question.multiSelect && selected.length !== 1) return false;
   return selected.every((id) => {
     if (!isCustomSelection(question, id)) return true;
-    return !!custom[question.id]?.trim();
+    return ownAnswer;
   });
 }
 
@@ -86,23 +115,30 @@ export function buildQuestionReply(
   questions: UserQuestion[],
   answers: Record<string, string[]>,
   custom: Record<string, string> = {},
+  attachments: Record<string, Attachment[]> = {},
 ): UserQuestionReply {
   const answered = questions.filter((question) =>
-    questionIsComplete(question, answers, custom),
+    questionIsComplete(question, answers, custom, attachments),
   );
   if (answered.length === 0) return { kind: "skipped" };
   const nextAnswers: Record<string, string[]> = {};
   const nextCustom: Record<string, string> = {};
+  const nextAttachments: Record<string, Attachment[]> = {};
   for (const question of answered) {
     const selected = answers[question.id];
     if (selected?.length) nextAnswers[question.id] = selected;
     const text = custom[question.id]?.trim();
     if (text) nextCustom[question.id] = text;
+    const files = questionAttachments(question, attachments);
+    if (files.length) nextAttachments[question.id] = files;
   }
   return {
     kind: "answered",
     answers: nextAnswers,
     ...(Object.keys(nextCustom).length > 0 ? { custom: nextCustom } : {}),
+    ...(Object.keys(nextAttachments).length > 0
+      ? { attachments: nextAttachments }
+      : {}),
   };
 }
 
@@ -119,6 +155,45 @@ export function selectedAnswerLabels(
     const label = option?.label.trim() || id.trim();
     return label ? [label] : [];
   });
+}
+
+/** What the user answered, question by question, for the transcript. */
+export function answeredQuestions(
+  questions: UserQuestion[],
+  reply: UserQuestionReply,
+): AnsweredQuestion[] {
+  if (reply.kind !== "answered") return [];
+  return questions.flatMap((question) => {
+    const answers = selectedAnswerLabels(question, reply);
+    const attachments = questionAttachments(question, reply.attachments);
+    if (answers.length === 0 && attachments.length === 0) return [];
+    return [
+      {
+        id: question.id,
+        ...(question.header ? { header: question.header } : {}),
+        prompt: question.prompt,
+        answers,
+        ...(attachments.length ? { attachments } : {}),
+      },
+    ];
+  });
+}
+
+/** Plain text of an answer, for search and surfaces without the card. */
+export function answeredQuestionsText(questions: AnsweredQuestion[]): string {
+  return questions
+    .map((question) =>
+      [
+        question.prompt,
+        ...question.answers,
+        ...(question.attachments?.length
+          ? [
+              `Attached: ${question.attachments.map((file) => file.name).join(", ")}`,
+            ]
+          : []),
+      ].join("\n"),
+    )
+    .join("\n\n");
 }
 
 export function isCustomSelection(

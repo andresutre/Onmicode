@@ -128,6 +128,46 @@ describe("Codex question protocol", () => {
     ).toEqual({ answers: { q: { answers: ["No"] } } });
   });
 
+  it("adds an answer's files as paths and keeps them off closed questions", () => {
+    const questions = codexQuestions({
+      questions: [
+        { id: "open", question: "What went wrong?" },
+        {
+          id: "closed",
+          question: "Continue?",
+          isOther: false,
+          options: [{ label: "Yes" }],
+        },
+      ],
+    });
+    const log = {
+      id: "log",
+      name: "build.log",
+      mimeType: "text/plain",
+      kind: "file" as const,
+      size: 4,
+      path: "/tmp/build.log",
+    };
+    expect(
+      codexQuestionResponse(questions, {
+        kind: "answered",
+        answers: { closed: ["Yes"] },
+        custom: { open: "It crashed" },
+        attachments: { open: [log], closed: [log] },
+      }),
+    ).toEqual({
+      answers: {
+        open: {
+          answers: [
+            "It crashed",
+            'Attached file (read from disk): "/tmp/build.log"',
+          ],
+        },
+        closed: { answers: ["Yes"] },
+      },
+    });
+  });
+
   it.each([
     { questions: [] },
     { questions: [{ question: "Missing ID" }] },
