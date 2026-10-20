@@ -98,6 +98,7 @@ export function UsageProviderChip({
   onManageAccounts,
   onConsumeReset,
   onReconnect,
+  onViewAllUsage,
   presentation,
   variant = "footer",
   compact = false,
@@ -113,6 +114,8 @@ export function UsageProviderChip({
   onManageAccounts?: () => void;
   onConsumeReset?: (creditId?: string) => Promise<CodexRateLimitResetOutcome>;
   onReconnect?: () => Promise<void>;
+  /** Opens the Usage page with every provider and account. */
+  onViewAllUsage?: () => void;
   /** `composer` matches the composer's quiet tool buttons. */
   variant?: UsageChipVariant;
   /**
@@ -495,6 +498,26 @@ export function UsageProviderChip({
                   onUse={useReset}
                   canUse={Boolean(onConsumeReset)}
                 />
+              ) : null}
+
+              {onViewAllUsage ? (
+                <button
+                  type="button"
+                  className="mt-2.5 flex h-7 w-full items-center gap-2 rounded-lg px-2 text-left text-[11px] text-content/55 hover:bg-content/[0.07] hover:text-content focus-visible:outline-2 focus-visible:outline-accent"
+                  onClick={() => {
+                    setOpen(false);
+                    onViewAllUsage();
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    View all usage
+                  </span>
+                  <ChevronRight
+                    className="size-3 shrink-0 text-content/35"
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
+                </button>
               ) : null}
             </>
           )}
@@ -1181,7 +1204,7 @@ function updatedLabel(limits: ProviderRateLimits, now: number): string {
   return `Updated ${Math.floor(elapsedMinutes / 60)}h ago`;
 }
 
-function resetOutcomeLabel(outcome: CodexRateLimitResetOutcome): string {
+export function resetOutcomeLabel(outcome: CodexRateLimitResetOutcome): string {
   if (outcome === "reset") return "Codex usage was reset.";
   if (outcome === "nothingToReset") return "There’s no active usage to reset.";
   if (outcome === "noCredit") return "No banked resets are available.";

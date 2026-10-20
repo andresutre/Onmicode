@@ -20,6 +20,7 @@ export function PiUsage({
   variant = "footer",
   refreshKey = 0,
   showRefresh = true,
+  onViewAllUsage,
 }: {
   model?: string;
   now: number;
@@ -27,6 +28,7 @@ export function PiUsage({
   /** Each change refreshes, for a footer whose own button covers Pi. */
   refreshKey?: number;
   showRefresh?: boolean;
+  onViewAllUsage?: () => void;
 }) {
   const provider = piUsageProvider(model);
   if (!provider) {
@@ -52,6 +54,7 @@ export function PiUsage({
       variant={variant}
       refreshKey={refreshKey}
       showRefresh={showRefresh}
+      onViewAllUsage={onViewAllUsage}
     />
   );
 }
@@ -62,12 +65,14 @@ function PiProviderUsage({
   variant,
   refreshKey,
   showRefresh,
+  onViewAllUsage,
 }: {
   provider: PiUsageProvider;
   now: number;
   variant: UsageChipVariant;
   refreshKey: number;
   showRefresh: boolean;
+  onViewAllUsage?: () => void;
 }) {
   const [limits, setLimits] = useState(() =>
     idleRateLimits(piBillingProvider(provider)),
@@ -125,6 +130,7 @@ function PiProviderUsage({
         limits={limits}
         now={now}
         variant={variant}
+        onViewAllUsage={onViewAllUsage}
         presentation={{
           sourceLabel: "Pi's saved OAuth account",
           harness: "pi",

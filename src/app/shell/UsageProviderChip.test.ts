@@ -177,6 +177,25 @@ describe("UsageProviderChip", () => {
     );
   });
 
+  it("closes to open the Usage page from its popover", async () => {
+    const onViewAllUsage = vi.fn();
+    act(() =>
+      root.render(
+        createElement(UsageProviderChip, {
+          limits: codexLimits(),
+          now,
+          onViewAllUsage,
+        }),
+      ),
+    );
+
+    await act(async () => button("Codex usage details").click());
+    await act(async () => button("View all usage").click());
+
+    expect(onViewAllUsage).toHaveBeenCalledOnce();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it("fills bars with used capacity by default", async () => {
     act(() =>
       root.render(

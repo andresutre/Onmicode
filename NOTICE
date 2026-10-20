@@ -4,7 +4,9 @@ agent harnesses it can drive.
 Provider marks that appear in the UI (including Claude, Codex, Cursor, GitHub, GitLab, Linear, Grok, OpenCode, Pi, omp, fx, Hermes, Nous Research, Devin, and Cognition) are trademarks of their respective owners and are used only to identify those products.
 
 Hidden-character sanitizing for prompt links
-(src/features/prompt-links/model/promptLinks.ts) is adapted from T3 Code
+(src/features/prompt-links/model/promptLinks.ts), the usage pace check
+(src/features/usage/model/usagePace.ts) and pooled account limits
+(src/features/usage/model/usagePools.ts) are adapted from T3 Code
 (https://github.com/pingdotgg/t3code), under the MIT License:
 
 Copyright (c) 2026 T3 Tools Inc.
