@@ -119,7 +119,7 @@ describe("file picker command mode", () => {
     expect(
       dialog.querySelector('[role="listbox"][aria-label="Commands"]'),
     ).not.toBeNull();
-    expect(dialog.textContent).toContain("Reload MonoCode");
+    expect(dialog.textContent).toContain("Reload Onmicode");
     expect(dialog.textContent).toContain(reloadActionHint());
     expect(rankProjectFiles).not.toHaveBeenCalled();
   });
@@ -138,7 +138,7 @@ describe("file picker command mode", () => {
     rankProjectFiles.mockClear();
     inputText(input, ">");
     expect(dialog.getAttribute("aria-label")).toBe("Command Palette");
-    expect(dialog.textContent).toContain("Reload MonoCode");
+    expect(dialog.textContent).toContain("Reload Onmicode");
     expect(rankProjectFiles).not.toHaveBeenCalled();
 
     inputText(input, "App");
@@ -157,11 +157,11 @@ describe("file picker command mode", () => {
     inputText(input, "> rmc");
     const reload = [
       ...dialog.querySelectorAll<HTMLButtonElement>("button"),
-    ].find((button) => button.textContent?.includes("Reload MonoCode"))!;
+    ].find((button) => button.textContent?.includes("Reload Onmicode"))!;
     expect(reload).not.toBeUndefined();
     expect(reload.querySelectorAll(".text-accent")).toHaveLength(3);
 
-    inputText(input, "> missing");
+    inputText(input, "> zzzqqq");
     expect(dialog.textContent).toContain("No matching commands");
     expect(dialog.textContent).not.toContain("No matching files");
   });
@@ -172,9 +172,11 @@ describe("file picker command mode", () => {
       const callbacks = renderPicker(">");
       const dialog = document.querySelector<HTMLElement>("[data-file-picker]")!;
       const input = dialog.querySelector<HTMLInputElement>("input")!;
+      inputText(input, "> reload");
       const reload = dialog.querySelector<HTMLButtonElement>(
         '[role="option"][aria-selected="true"]',
       )!;
+      expect(reload.textContent).toContain("Reload Onmicode");
 
       if (method === "click") act(() => reload.click());
       else press(input, "Enter");
@@ -184,6 +186,41 @@ describe("file picker command mode", () => {
       expect(callbacks.onOpenFile).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("command palette jump targets", () => {
+  it("lists sessions and projects under headings and runs their ids", () => {
+    const onRunAction = vi.fn();
+    act(() =>
+      root.render(
+        createElement(FilePicker, {
+          open: true,
+          cwd: "/repo",
+          initialQuery: ">",
+          paletteItems: [
+            { id: "session:s1", label: "Fix login bug", group: "Sessions", detail: "repo" },
+            { id: "project:/work/site", label: "site", group: "Projects", detail: "/work/site" },
+          ],
+          onOpenFile: vi.fn(),
+          onRunAction,
+          onClose: vi.fn(),
+        }),
+      ),
+    );
+    const dialog = document.querySelector<HTMLElement>("[data-file-picker]")!;
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+    expect(dialog.textContent).toContain("Commands");
+    expect(dialog.textContent).toContain("Sessions");
+    expect(dialog.textContent).toContain("Projects");
+
+    inputText(input, "> login");
+    const selected = dialog.querySelector<HTMLButtonElement>(
+      '[role="option"][aria-selected="true"]',
+    )!;
+    expect(selected.textContent).toContain("Fix login bug");
+    press(input, "Enter");
+    expect(onRunAction).toHaveBeenCalledExactlyOnceWith("session:s1");
+  });
 });
 
 describe("file picker on a remote project", () => {

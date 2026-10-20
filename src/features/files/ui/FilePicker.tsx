@@ -1,4 +1,9 @@
-import { RefreshCw, Search } from "../../../shared/ui/icons";
+import {
+  ChevronRight,
+  Folder,
+  MessageSquare,
+  Search,
+} from "../../../shared/ui/icons";
 import {
   useEffect,
   useMemo,
@@ -17,7 +22,12 @@ import {
   type RankedFile,
 } from "../model/fileIndex";
 import { LAYER } from "../../../shared/lib/layers";
-import { fuzzyMatch, type FuzzyHit } from "../../../shared/lib/fuzzy";
+import {
+  paletteCommands,
+  rankPaletteItems,
+  type PaletteItem,
+  type RankedPaletteItem,
+} from "../model/commandPalette";
 import {
   looksLikeProject,
 } from "../../projects/model/recents";
@@ -26,26 +36,17 @@ import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { MatchText } from "../../../shared/ui/MatchText";
 import { MOD, SHIFT } from "../../../platform/tauri/platform";
-type Action = {
-  id: string;
-  label: string;
-  hint?: string;
-};
-
-type RankedAction = Action & FuzzyHit;
 export function reloadActionHint(mod = MOD, shift = SHIFT) {
   return `${mod}${shift}R`;
 }
-
-const ACTIONS: Action[] = [
-  { id: "reload", label: "Reload MonoCode", hint: reloadActionHint() },
-];
 
 type Props = {
   open: boolean;
   cwd: string;
   openPaths?: string[];
   initialQuery?: string;
+  /** Sessions and projects the palette can jump to, after its commands. */
+  paletteItems?: PaletteItem[];
   onOpenFile: OpenFileFn;
   onRunAction: (id: string) => void;
   onClose: () => void;
@@ -56,6 +57,7 @@ export function FilePicker({
   cwd,
   openPaths = [],
   initialQuery = "",
+  paletteItems,
   onOpenFile,
   onRunAction,
   onClose,
@@ -87,20 +89,13 @@ export function FilePicker({
     () => (paletteMode ? [] : rankProjectFiles(files, query, recents)),
     [files, paletteMode, query, recents],
   );
-  const actionResults = useMemo((): RankedAction[] => {
+  const actionResults = useMemo((): RankedPaletteItem[] => {
     if (!paletteMode) return [];
-    if (!actionQuery) {
-      return ACTIONS.map((action) => ({
-        ...action,
-        score: 0,
-        positions: [],
-      }));
-    }
-    return ACTIONS.flatMap((action) => {
-      const hit = fuzzyMatch(actionQuery, action.label);
-      return hit ? [{ ...action, ...hit }] : [];
-    }).sort((a, b) => b.score - a.score);
-  }, [actionQuery, paletteMode]);
+    return rankPaletteItems(
+      [...paletteCommands(), ...(paletteItems ?? [])],
+      actionQuery,
+    );
+  }, [actionQuery, paletteMode, paletteItems]);
   const optionCount = paletteMode ? actionResults.length : results.length;
 
   useEffect(() => {
@@ -168,7 +163,7 @@ export function FilePicker({
     onOpenFile(file.path, undefined, { exact: true });
     onClose();
   };
-  const runAction = (action: RankedAction) => {
+  const runAction = (action: RankedPaletteItem) => {
     onRunAction(action.id);
     onClose();
   };
@@ -298,6 +293,12 @@ function emptyLabel({
   return null;
 }
 
+const PALETTE_ICONS = {
+  Commands: ChevronRight,
+  Sessions: MessageSquare,
+  Projects: Folder,
+} as const;
+
 function ActionList({
   actions,
   active,
@@ -305,11 +306,11 @@ function ActionList({
   onActive,
   onRun,
 }: {
-  actions: RankedAction[];
+  actions: RankedPaletteItem[];
   active: number;
   query: string;
   onActive: (index: number) => void;
-  onRun: (action: RankedAction) => void;
+  onRun: (action: RankedPaletteItem) => void;
 }) {
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -327,37 +328,58 @@ function ActionList({
     >
       {actions.map((action, index) => {
         const highlighted = index === active;
+        const Icon = PALETTE_ICONS[action.group];
+        const heading =
+          index === 0 || actions[index - 1].group !== action.group
+            ? action.group
+            : null;
         return (
-          <button
-            key={action.id}
-            ref={highlighted ? activeRef : undefined}
-            type="button"
-            role="option"
-            aria-selected={highlighted}
-            onMouseDown={(e) => e.preventDefault()}
-            onMouseEnter={() => onActive(index)}
-            onClick={() => onRun(action)}
-            className={`flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm leading-none ${
-              highlighted ? "bg-selection text-content" : "text-content"
-            }`}
-          >
-            <RefreshCw
-              className="size-4 shrink-0 text-content/50"
-              strokeWidth={1.75}
-            />
-            <span className="min-w-0 flex-1 truncate">
-              <MatchText
-                text={action.label}
-                positions={action.positions}
-                active={Boolean(query)}
-              />
-            </span>
-            {action.hint ? (
-              <kbd className="ml-auto shrink-0 rounded border border-content/10 bg-content/5 px-1.5 py-0.5 font-mono text-[10px] text-content/50">
-                {action.hint}
-              </kbd>
+          <div key={action.id} role="presentation">
+            {heading ? (
+              <div
+                role="presentation"
+                className="px-2 pb-1 pt-2 text-[11px] font-medium text-content/40"
+              >
+                {heading}
+              </div>
             ) : null}
-          </button>
+            <button
+              ref={highlighted ? activeRef : undefined}
+              type="button"
+              role="option"
+              aria-selected={highlighted}
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseEnter={() => onActive(index)}
+              onClick={() => onRun(action)}
+              className={`flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm leading-none ${
+                highlighted ? "bg-selection text-content" : "text-content"
+              }`}
+            >
+              <Icon
+                className="size-4 shrink-0 text-content/50"
+                strokeWidth={1.75}
+              />
+              <span className="min-w-0 shrink truncate">
+                <MatchText
+                  text={action.label}
+                  positions={action.positions}
+                  active={Boolean(query)}
+                />
+              </span>
+              {action.detail ? (
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-content/40">
+                  {action.detail}
+                </span>
+              ) : (
+                <span className="flex-1" />
+              )}
+              {action.hint ? (
+                <kbd className="ml-auto shrink-0 rounded border border-content/10 bg-content/5 px-1.5 py-0.5 font-mono text-[10px] text-content/50">
+                  {action.hint}
+                </kbd>
+              ) : null}
+            </button>
+          </div>
         );
       })}
     </div>

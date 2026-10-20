@@ -145,6 +145,10 @@ import { resolveZoomKeybinding } from "../features/settings/model/zoomKeybinding
 import { resolveAppShortcut } from "../features/settings/model/appShortcuts";
 import { runUpdateFlow } from "./model/updater";
 import {
+  paletteProjects,
+  paletteSessions,
+} from "../features/files/model/commandPalette";
+import {
   displayAttachments,
   prepareAttachments,
 } from "../features/sessions/model/attachments";
@@ -10377,6 +10381,57 @@ function Workspace({
     onOpenApprovalSession,
   };
 
+  const paletteItems = useMemo(
+    () => [
+      ...paletteSessions(history),
+      ...paletteProjects(recents.map((recent) => recent.path)),
+    ],
+    [history, recents],
+  );
+  // Runs a command palette row. Ids come from `features/files/model/commandPalette`.
+  const onRunPaletteAction = (id: string) => {
+    const a = actions.current;
+    if (id.startsWith("session:")) {
+      void onSelectHistorySession(id.slice("session:".length));
+      return;
+    }
+    if (id.startsWith("project:")) {
+      onSelectProject(id.slice("project:".length));
+      return;
+    }
+    const zoomTo = (scale: number) => void applyUiScale(saveUiScale(scale));
+    const commands: Record<string, () => void> = {
+      "new-session": a.onNewFocused,
+      "open-project": () => void a.pickProject(),
+      "go-to-file": a.onGoToFile,
+      search: a.onOpenSearch,
+      "find-in-files": a.onFindInProject,
+      inbox: a.onOpenInbox,
+      notes: a.onOpenNotes,
+      automations: onOpenAutomations,
+      settings: () => a.openSettings(),
+      keybindings: () => a.openSettings("keybindings"),
+      "toggle-sidebar": a.onToggleSidebar,
+      "toggle-session-sidebar": a.onToggleSessionSidebar,
+      "split-right": () => a.onSplit("right"),
+      "split-down": () => a.onSplit("down"),
+      "new-terminal": a.onNewTerminal,
+      "new-terminal-tab": a.onNewTerminalTab,
+      "toggle-terminal": a.onToggleProjectTerminal,
+      "close-other-tabs": a.onCloseOtherTabs,
+      "close-all-tabs": a.onCloseAllTabs,
+      "zoom-in": () => zoomTo(zoomInUiScale(loadUiScale())),
+      "zoom-out": () => zoomTo(zoomOutUiScale(loadUiScale())),
+      "zoom-reset": () => zoomTo(UI_SCALE_DEFAULT),
+      "new-window": () => void invoke("open_new_window"),
+      "check-updates": () => void runUpdateFlow(true),
+      reload: a.onReload,
+    };
+    const command = commands[id];
+    // The palette closes after this returns; let it unmount before views open.
+    if (command) requestAnimationFrame(command);
+  };
+
   const debounce = useRef({ name: "", at: 0 });
   const run = useCallback((name: string, fn: () => void) => {
     const now = performance.now();
@@ -11733,10 +11788,9 @@ function Workspace({
               cwd={filesCwd}
               openPaths={openFilePaths}
               initialQuery={filePickerInitialQuery}
+              paletteItems={paletteItems}
               onOpenFile={onOpenFile}
-              onRunAction={(id) => {
-                if (id === "reload") actions.current.onReload();
-              }}
+              onRunAction={onRunPaletteAction}
               onClose={() => setFilePickerOpen(false)}
             />
           ) : null}
