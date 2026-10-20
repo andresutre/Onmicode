@@ -54,6 +54,7 @@ mod tool_detail;
 mod trackpad_zoom;
 #[cfg(target_os = "windows")]
 mod tray;
+mod usage_history;
 mod visuals;
 mod window;
 mod window_transfer;
@@ -541,6 +542,7 @@ pub fn run() {
             session_store::session_take_in_flight,
             session_store::workspace_set_snapshot,
             session_store::workspace_get_snapshot,
+            usage_history::usage_history,
             notes::notes_list,
             notes::notes_get,
             notes::notes_upsert,

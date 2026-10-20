@@ -4,6 +4,7 @@ import { IS_MAC } from "../../../platform/tauri/platform";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { Gauge } from "../../../shared/ui/icons";
 import type { ProviderAccountProvider } from "../../providers/model/providerAccounts";
+import { UsageHistorySection } from "../history";
 import { UsageLimitsSection } from "./UsageLimitsSection";
 
 type Props = {
@@ -17,7 +18,10 @@ type Props = {
   onManageAccounts?: (provider: ProviderAccountProvider) => void;
 };
 
-/** Plan limits for every provider and account, on a page of their own. */
+/**
+ * Plan limits for every provider and account, and the tokens agents used
+ * over time, on a page of their own.
+ */
 export function UsageView({
   tabbed = false,
   active = true,
@@ -66,14 +70,15 @@ export function UsageView({
               Usage
             </h1>
             <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-content/45">
-              Plan limits for every provider and account Onmicode can read.
+              Plan limits for every provider and account Onmicode can read, and
+              the tokens your agents used over time.
             </p>
           </header>
           <UsageLimitsSection
             active={active}
             onManageAccounts={onManageAccounts}
           />
-          {/* Token and cost history (features/usage/history) goes here, below the limits. */}
+          <UsageHistorySection />
         </div>
       </div>
     </div>
