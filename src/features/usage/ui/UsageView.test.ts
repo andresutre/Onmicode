@@ -194,7 +194,43 @@ describe("UsageView", () => {
     expect(button("Sign in to Claude Code")).toBeDefined();
   });
 
-  it("lists every account of a provider with its banked resets", async () => {
+  // Runs before the next test folds and opens the Codex accounts, which the
+  // page then remembers for the session.
+  it("notes an account left out of the pool and keeps the accounts open", async () => {
+    saveShowRemainingUsage(true);
+    saveProviderAccount({
+      id: "account-work",
+      provider: "codex",
+      label: "Work",
+    });
+    saveProviderAccount({
+      id: "account-spare",
+      provider: "codex",
+      label: "Spare",
+    });
+    setCachedRateLimits("codex", "account-work", ok("codex", 50));
+    setCachedRateLimits(
+      "codex",
+      "account-spare",
+      errorRateLimits("codex", "Codex sign-in expired"),
+    );
+    await render();
+
+    const pooled = card("codex")?.querySelector("[data-usage-pooled]");
+    expect(pooled?.textContent).toContain("2 combined, each counted equally");
+    expect(
+      pooled?.querySelector('[data-usage-pool="session"]')?.textContent,
+    ).toContain("avg 65% left");
+    expect(
+      pooled?.querySelector("[data-usage-pool-excluded]")?.textContent,
+    ).toBe("1 account not included: Spare (Codex sign-in expired)");
+    expect(
+      card("codex")?.querySelectorAll("[data-usage-account]"),
+    ).toHaveLength(3);
+    expect(button("Sign in to Codex as Spare")).toBeDefined();
+  });
+
+  it("pools two or more accounts and folds them under the pool", async () => {
     saveProviderAccount({
       id: "account-work",
       provider: "codex",
@@ -203,19 +239,45 @@ describe("UsageView", () => {
     setCachedRateLimits(
       "codex",
       "account-work",
-      ok("codex", 50, {
+      ok("codex", 0, {
+        session: { usedPercent: 100, windowMinutes: 300, resetsAt: now + HOUR },
         resetCredits: { availableCount: 2, credits: null },
       }),
     );
     await render();
 
-    const accounts = card("codex")?.querySelectorAll("[data-usage-account]");
-    expect(card("codex")?.textContent).toContain("2 accounts");
+    expect(card("claude")?.querySelector("[data-usage-pooled]")).toBeNull();
+    const codex = card("codex");
+    expect(codex?.textContent).toContain("2 accounts");
+    const session = codex?.querySelector('[data-usage-pool="session"]');
+    expect(session?.textContent).toContain("5-hour limit");
+    expect(session?.textContent).toContain("avg 60% used");
+    expect(session?.textContent).toContain("1 of 2 accounts have room");
+    expect(session?.textContent).toContain("Next account frees up in 1h");
+    const segments = session?.querySelectorAll("[data-usage-pool-member]");
+    expect(segments).toHaveLength(2);
+    expect(segments?.[0].textContent).toBe("Default account20%");
+    expect(segments?.[1].textContent).toBe("Work100%");
+    expect(segments?.[1].getAttribute("title")).toBe(
+      "Work: 100% used, frees up in 1h",
+    );
+    expect(
+      codex?.querySelector('[data-usage-pool="weekly"]')?.textContent,
+    ).toContain("Both accounts have room");
+
+    const toggle = codex?.querySelector<HTMLButtonElement>(
+      "[data-usage-accounts-toggle]",
+    );
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle?.textContent).toContain("Default account, Work");
+    expect(toggle?.textContent).toContain("2 banked resets");
+    expect(codex?.querySelectorAll("[data-usage-account]")).toHaveLength(0);
+
+    await act(async () => toggle?.click());
+    const accounts = codex?.querySelectorAll("[data-usage-account]");
     expect(accounts).toHaveLength(2);
     expect(accounts?.[0].textContent).toContain("Default account");
-    expect(accounts?.[1].textContent).toContain("Work");
     expect(accounts?.[1].textContent).toContain("Banked resets2");
-
     await act(async () => button("Use a reset").click());
     expect(accounts?.[1].textContent).toContain("Spend one reset now?");
   });

@@ -46,6 +46,7 @@ import { ProviderAccountSubtitle } from "../../providers/ui/ProviderAccountSubti
 import { HarnessIcon } from "../../sessions/ui/HarnessIcon";
 import { useShowRemainingUsage } from "../../settings/model/displayPrefs";
 import { usePiLimits } from "../model/piLimits";
+import { usagePools } from "../model/usagePools";
 import {
   refreshUsage,
   signInAndReload,
@@ -72,6 +73,7 @@ import {
   type UsageSection,
   type UsageWindowKind,
 } from "../model/usageSections";
+import { UsagePooledLimits } from "./UsagePooledLimits";
 
 const CLOCK_MS = 30_000;
 
@@ -244,6 +246,9 @@ function ProviderTile({ section }: { section: UsageSection }) {
   );
 }
 
+/** Which pooled cards had their accounts opened or folded this session. */
+const accountListsOpen = new Map<string, boolean>();
+
 function UsageProviderCard({
   section,
   identities,
@@ -269,6 +274,32 @@ function UsageProviderCard({
     supportsAccountProfiles(section.accountProvider)
       ? section.accountProvider
       : null;
+  const summary = several
+    ? usagePools(
+        section.accounts.map((entry) => ({
+          key: entry.key,
+          label: entry.label ?? section.title,
+          limits: entry.limits,
+        })),
+        now,
+      )
+    : null;
+  const pooled = summary && summary.pools.length > 0 ? summary : null;
+  // Accounts fold under the pool once every one of them reads fine; one
+  // that needs signing in again keeps them open.
+  const [accountsOpen, setAccountsOpen] = useState(
+    () =>
+      accountListsOpen.get(section.id) ??
+      section.accounts.some((entry) =>
+        ["expired", "signedOut", "failed"].includes(
+          usageAccountState(entry.limits),
+        ),
+      ),
+  );
+  const banked = section.accounts.reduce(
+    (sum, entry) => sum + (entry.limits?.resetCredits?.availableCount ?? 0),
+    0,
+  );
   return (
     <article
       aria-label={`${section.title} usage`}
@@ -321,18 +352,52 @@ function UsageProviderCard({
           ) : null}
         </div>
       </header>
-      {section.accounts.map((entry) => (
-        <UsageAccountBlock
-          key={entry.key}
-          section={section}
-          entry={entry}
-          identity={
-            entry.account ? identities[identityKey(entry.account)] : undefined
-          }
-          showHeader={several}
-          now={now}
-        />
-      ))}
+      {pooled ? (
+        <>
+          <UsagePooledLimits summary={pooled} now={now} />
+          <button
+            type="button"
+            aria-expanded={accountsOpen}
+            data-usage-accounts-toggle
+            className="flex w-full min-w-0 items-center gap-1.5 border-t border-content/5 px-4 py-2.5 text-left text-[12px] text-content/55 hover:bg-content/[0.03] hover:text-content"
+            onClick={() => {
+              accountListsOpen.set(section.id, !accountsOpen);
+              setAccountsOpen(!accountsOpen);
+            }}
+          >
+            <ChevronRight
+              className={`size-3 shrink-0 transition-transform duration-150 ${accountsOpen ? "rotate-90" : ""}`}
+              strokeWidth={1.75}
+              aria-hidden
+            />
+            <span className="shrink-0 font-medium">By account</span>
+            <span className="min-w-0 truncate text-content/35">
+              {section.accounts.map((entry) => entry.label).join(", ")}
+            </span>
+            {banked > 0 ? (
+              <span className="ml-auto shrink-0 text-[10px] text-content/45">
+                {banked} banked {banked === 1 ? "reset" : "resets"}
+              </span>
+            ) : null}
+          </button>
+        </>
+      ) : null}
+      {!pooled || accountsOpen
+        ? section.accounts.map((entry) => (
+            <UsageAccountBlock
+              key={entry.key}
+              section={section}
+              entry={entry}
+              identity={
+                entry.account
+                  ? identities[identityKey(entry.account)]
+                  : undefined
+              }
+              showHeader={several}
+              now={now}
+            />
+          ))
+        : null}
     </article>
   );
 }
