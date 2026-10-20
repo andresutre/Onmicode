@@ -40,6 +40,20 @@ export function supportsProviderAccounts(
  * pi-claude-code extension, which runs the Claude CLI, so a Pi session picks
  * from the Claude accounts and its account id is a Claude one.
  */
+/**
+ * Pi's built-in `openai-codex` models sign in with a Codex profile apart from
+ * its Claude one: the project's selected Codex account, the same one the
+ * footer's Codex chip shows and switches.
+ */
+export function piCodexAccountId(
+  harness: HarnessId | undefined,
+  project: string | undefined,
+): string | undefined {
+  return harness === "pi"
+    ? selectedProviderAccountId("codex", project)
+    : undefined;
+}
+
 export function accountProviderFor(
   harness: HarnessId | undefined,
 ): ProviderAccountProvider | undefined {

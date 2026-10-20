@@ -28,6 +28,9 @@ const DEFAULT_PROVIDER_ACCOUNT_ID: &str = "default";
 pub struct HarnessAccount {
     provider: String,
     id: String,
+    /// Pi only: the Codex profile its `openai-codex` models sign in with.
+    #[serde(default)]
+    codex_id: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -289,9 +292,10 @@ impl HarnessHost {
                 .iter()
                 .filter_map(|(session_id, live)| {
                     let account = live.account.as_ref()?;
-                    (account_home_provider(&account.provider) == provider
+                    ((account_home_provider(&account.provider) == provider
                         && account.id == account_id)
-                        .then(|| session_id.clone())
+                        || (provider == "codex" && account.codex_id.as_deref() == Some(account_id)))
+                    .then(|| session_id.clone())
                 })
                 .collect();
             session_ids
@@ -954,6 +958,12 @@ pub fn harness_spawn(
     if loads_pi_ask_user(binary_provider.as_deref(), &args) {
         apply_pi_ask_user(&app, &mut cmd)?;
     }
+    // Only Pi's agent sessions: other subcommands (update, auth) take no `-e`.
+    if binary_provider.as_deref() == Some("pi")
+        && args.first().map(String::as_str) == Some("--mode")
+    {
+        apply_pi_codex_login(&app, &mut cmd, account.as_ref())?;
+    }
     apply_provider_account(&app, &mut cmd, account.as_ref())?;
     crate::control::configure_child(&app, &session_id, &mut cmd);
 
@@ -1166,7 +1176,56 @@ fn apply_pi_ask_user(app: &AppHandle, cmd: &mut Command) -> Result<(), String> {
     Ok(())
 }
 
-/// Pi has no logins of its own to switch: its profiles are Claude's.
+const PI_CODEX_LOGIN: &str = include_str!("pi_codex_login.mjs");
+
+/// Pi signs its built-in `openai-codex` models in with its own ChatGPT login.
+/// Every Pi Onmicode starts also loads a small extension that hands Pi the
+/// Codex CLI login of the chosen Codex profile instead, read again before each
+/// run. Pi's own `auth.json` is never written; without a Codex login Pi keeps
+/// whatever it has.
+fn apply_pi_codex_login(
+    app: &AppHandle,
+    cmd: &mut Command,
+    account: Option<&HarnessAccount>,
+) -> Result<(), String> {
+    let codex_home = match account
+        .filter(|account| account.provider == "pi")
+        .and_then(|account| account.codex_id.as_deref())
+    {
+        Some(id) => provider_account_dir(app, "codex", Some(id))?,
+        None => None,
+    }
+    .or_else(default_codex_home);
+    let Some(codex_home) = codex_home else {
+        return Ok(());
+    };
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("pi");
+    let extension = dir.join("onmicode-codex-login.mjs");
+    if std::fs::read_to_string(&extension).ok().as_deref() != Some(PI_CODEX_LOGIN) {
+        std::fs::create_dir_all(&dir)
+            .and_then(|()| std::fs::write(&extension, PI_CODEX_LOGIN))
+            .map_err(|error| format!("Could not write the Pi Codex login extension: {error}"))?;
+    }
+    // An explicit `-e` loads even under `--no-extensions`, so one-shot jobs
+    // reach Codex too.
+    cmd.arg("-e")
+        .arg(&extension)
+        .env("ONMICODE_CODEX_HOME", codex_home);
+    Ok(())
+}
+
+fn default_codex_home() -> Option<PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| crate::dirs_home().map(|home| PathBuf::from(home).join(".codex")))
+}
+
+/// Pi's own account is its Claude one; its Codex profile rides along apart.
 fn account_home_provider(provider: &str) -> &str {
     if provider == "pi" {
         "claude"

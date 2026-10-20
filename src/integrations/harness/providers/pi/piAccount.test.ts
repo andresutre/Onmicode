@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Account selections live in localStorage; the node test runner has none.
+const store = new Map<string, string>();
+vi.stubGlobal("localStorage", {
+  getItem: (key: string) => store.get(key) ?? null,
+  setItem: (key: string, value: string) => store.set(key, value),
+  removeItem: (key: string) => store.delete(key),
+  clear: () => store.clear(),
+});
+vi.stubGlobal("window", new EventTarget());
+
 const transport = vi.hoisted(() => ({
   watchers: new Map<string, (line: string) => void>(),
   spawns: [] as Array<{ sessionId: string; account: unknown }>,
@@ -28,7 +38,11 @@ vi.mock("../../core/child", () => ({
 
 import { forgetPiSession, sendPiTurn } from "./pi";
 import { runPiTextPrompt, stopPiTextPrompt } from "./piText";
-import { accountProviderFor } from "../../../../features/providers/model/providerAccounts";
+import {
+  accountProviderFor,
+  piCodexAccountId,
+  selectProviderAccount,
+} from "../../../../features/providers/model/providerAccounts";
 import {
   otherUsageProvidersFor,
   usageProvidersFor,
@@ -65,6 +79,7 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
+  localStorage.clear();
   await stopPiTextPrompt();
   for (const id of [...transport.watchers.keys()]) await forgetPiSession(id);
 });
@@ -122,6 +137,55 @@ describe("Pi accounts", () => {
     });
   });
 
+  it("signs Pi's Codex models in with the chosen Codex profile", async () => {
+    await sendPiTurn({ ...turn(), codexAccountId: "account-codex" });
+    expect(transport.spawns).toEqual([
+      {
+        sessionId: "pi-account",
+        account: { provider: "pi", id: "default", codexId: "account-codex" },
+      },
+    ]);
+  });
+
+  it("restarts Pi when the Codex profile changes", async () => {
+    await sendPiTurn({ ...turn("account-work"), codexAccountId: "default" });
+    await sendPiTurn({
+      ...turn("account-work"),
+      codexAccountId: "account-codex",
+    });
+    expect(transport.spawns.map((spawn) => spawn.account)).toEqual([
+      { provider: "pi", id: "account-work" },
+      { provider: "pi", id: "account-work", codexId: "account-codex" },
+    ]);
+  });
+
+  it("runs title prompts under the same Codex profile", async () => {
+    await runPiTextPrompt({
+      cwd: "/repo",
+      model: "openai-codex/gpt-5.6-luna",
+      prompt: "Title this",
+      codexAccountId: "account-codex",
+    });
+    expect(transport.spawns.at(-1)?.account).toEqual({
+      provider: "pi",
+      id: "default",
+      codexId: "account-codex",
+    });
+  });
+
+  it("takes a Pi session's Codex profile from the project's selection", () => {
+    localStorage.setItem(
+      "monocode.providerAccounts.v1",
+      JSON.stringify({
+        codex: [{ id: "account-codex", provider: "codex", label: "Work" }],
+      }),
+    );
+    selectProviderAccount("codex", "/repo", "account-codex");
+    expect(piCodexAccountId("pi", "/repo")).toBe("account-codex");
+    expect(piCodexAccountId("pi", "/other")).toBe("default");
+    expect(piCodexAccountId("claude", "/repo")).toBeUndefined();
+  });
+
   it("picks Pi's accounts from Claude's", () => {
     expect(accountProviderFor("pi")).toBe("claude");
     expect(accountProviderFor("codex")).toBe("codex");
@@ -135,6 +199,9 @@ describe("Pi accounts", () => {
     expect(
       otherUsageProvidersFor("pi", "pi:claude-code/claude-sonnet-5-5"),
     ).toEqual(["codex", "opencode", "devin"]);
-    expect(usageProvidersFor("pi", "pi:openai-codex/gpt-5.4")).toEqual([]);
+    expect(usageProvidersFor("pi", "pi:openai-codex/gpt-5.6-luna")).toEqual([
+      "codex",
+    ]);
+    expect(usageProvidersFor("pi", "pi:openrouter/some-model")).toEqual([]);
   });
 });

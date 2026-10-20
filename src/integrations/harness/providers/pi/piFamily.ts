@@ -117,6 +117,8 @@ type Live = {
    * in its own folder whatever the account, so a switch only restarts Pi.
    */
   providerAccountId?: string;
+  /** The Codex profile Pi's `openai-codex` models sign in with. */
+  codexAccountId?: string;
   providerSessionId: string;
   contextWindow?: number;
   nativeModel: string;
@@ -206,16 +208,30 @@ type Resume = {
   cwd: string;
 };
 
-/** The spawn account for a Pi child, signed in through a Claude profile. */
+/**
+ * The spawn account for a Pi child: the Claude profile pi-claude-code signs
+ * in with, and the Codex profile Pi's `openai-codex` models sign in with.
+ */
 export function piAccount(
   flavor: PiFlavor,
   providerAccountId: string | undefined,
-): { provider: "pi"; id: string } | undefined {
-  return flavor.id === "pi" &&
-    providerAccountId &&
-    providerAccountId !== DEFAULT_PROVIDER_ACCOUNT_ID
-    ? { provider: "pi", id: providerAccountId }
-    : undefined;
+  codexAccountId?: string,
+): { provider: "pi"; id: string; codexId?: string } | undefined {
+  if (flavor.id !== "pi") return undefined;
+  const claude =
+    providerAccountId && providerAccountId !== DEFAULT_PROVIDER_ACCOUNT_ID
+      ? providerAccountId
+      : undefined;
+  const codex =
+    codexAccountId && codexAccountId !== DEFAULT_PROVIDER_ACCOUNT_ID
+      ? codexAccountId
+      : undefined;
+  if (!claude && !codex) return undefined;
+  return {
+    provider: "pi",
+    id: claude ?? DEFAULT_PROVIDER_ACCOUNT_ID,
+    ...(codex ? { codexId: codex } : {}),
+  };
 }
 
 const INIT_TIMEOUT_MS = 45_000;
@@ -550,7 +566,11 @@ async function ensureLive(
     existing &&
     existing.cwd === input.cwd &&
     existing.planning === wantPlanning &&
-    sameProviderAccountId(existing.providerAccountId, input.providerAccountId)
+    sameProviderAccountId(
+      existing.providerAccountId,
+      input.providerAccountId,
+    ) &&
+    sameProviderAccountId(existing.codexAccountId, input.codexAccountId)
   ) {
     existing.onEvent = input.onEvent;
     await applyModel(flavor, existing, input);
@@ -607,6 +627,7 @@ async function startLive(
     rpc,
     cwd: input.cwd,
     providerAccountId: input.providerAccountId,
+    codexAccountId: input.codexAccountId,
     providerSessionId: resume ?? "",
     nativeModel: native,
     thinking: input.modelSettings?.thinking ?? "",
@@ -681,7 +702,7 @@ async function startLive(
       plan: input.intent === "plan",
     }),
     input.cwd,
-    piAccount(flavor, input.providerAccountId),
+    piAccount(flavor, input.providerAccountId, input.codexAccountId),
     flavor.id,
   );
 

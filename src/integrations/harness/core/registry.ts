@@ -26,12 +26,14 @@ export type TitleInput = {
   cwd: string;
   message: string;
   providerAccountId?: string;
+  codexAccountId?: string;
 };
 
 /** One-shot, isolated text generation shared by titles and side questions. */
 export type TextPromptInput = {
   cwd: string;
   providerAccountId?: string;
+  codexAccountId?: string;
   model?: string;
   modelSettings?: Record<string, string>;
   /** Codex defaults to unsaved threads; false allows resumable side questions. */

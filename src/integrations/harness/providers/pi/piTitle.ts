@@ -15,12 +15,14 @@ async function generateSessionTitle(
     cwd: string;
     message: string;
     providerAccountId?: string;
+    codexAccountId?: string;
   },
 ): Promise<GeneratedSessionTitle | null> {
   try {
     const output = await runTextPrompt(flavor, {
       cwd: input.cwd,
       providerAccountId: input.providerAccountId,
+      codexAccountId: input.codexAccountId,
       prompt: buildThreadTitlePrompt(input.message),
       timeoutMs: TITLE_TIMEOUT_MS,
     });
@@ -36,6 +38,7 @@ export function generatePiSessionTitle(input: {
   cwd: string;
   message: string;
   providerAccountId?: string;
+  codexAccountId?: string;
 }): Promise<GeneratedSessionTitle | null> {
   return generateSessionTitle(PI_FLAVOR, input);
 }
