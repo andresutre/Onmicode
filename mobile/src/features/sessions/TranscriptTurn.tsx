@@ -2,9 +2,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { createContext, memo, use, useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import Svg, { Path } from "react-native-svg";
 
-import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { useCollapsedToolCalls } from "@/features/settings/toolCalls";
 import type {
   Turn,
@@ -21,17 +19,11 @@ import { Markdown } from "./Markdown";
 import { ProviderLogo } from "./ProviderLogo";
 import { sessionErrorContent, type SessionErrorNotice } from "./sessionError";
 import {
-  dayStamp,
   formatClockTime,
   formatWorkingDuration,
   hasTurnMetrics,
 } from "./transcriptFormat";
 import { TurnMetricsSheet } from "./TurnMetricsSheet";
-
-/** Who a Mono's turns are by, in place of the model and provider mark. */
-export type TranscriptAgent = { name: string; mascot: string; color: string };
-
-type HeaderItem = Extract<TurnItem, { type: "header" }>;
 
 const GUTTER = 20;
 /** One size for the work, fold line to steps, matching the reply text. */
@@ -52,41 +44,29 @@ const CONTENT_X = GUTTER + FOLD_MARK + 6;
 /** The desktop footer's `text-content/40` buttons. */
 /** The desktop's rail: content at 14% over the background, opaque so lines meet cleanly. */
 /** The desktop's `bg-content/10` over the background, opaque so the tail can overlap. */
-/** The desktop's `bg-content/[0.07]` pills: day stamps and a Mono's signature. */
-// The desktop's bubble tail (src/styles/index.css), drawn against an 18px corner.
-const TAIL =
-  "M9 15.6C9.05 16.3 9.05 17.4 9.05 18.6C9.05 20 8.3 21.4 7.4 22.6Q6.9 23.4 7.8 23.5C9.6 23.3 11.6 22.3 13.2 21.5C15 20.5 16.2 19.6 17.2 18.8C17.9 18.25 18.6 18 19.6 18L18 18A18 18 0 0 1 9 15.6Z";
 
 /**
  * One turn, laid out as AgentTranscript does: the prompt in a bubble on the
  * right, the work folded behind one status line, the answer as full-width
- * Markdown, and when it landed underneath. A Mono's turn signs with its mascot
- * and name in a pill and keeps its work in that line.
+ * Markdown, and when it landed underneath.
  */
 export const TranscriptTurn = memo(function TranscriptTurn({
   turn,
-  agent,
   onError,
 }: {
   turn: Turn;
-  agent?: TranscriptAgent;
   onError: (notice: SessionErrorNotice) => void;
 }) {
   const styles = useStyles();
   return (
     <View>
-      {turn.stampAt != null ? <DaySeparator at={turn.stampAt} /> : null}
       {turn.items.map((item, index) => {
         const previous = turn.items[index - 1];
         switch (item.type) {
           case "user":
-            return <UserMessage key={item.id} item={item} tail={!!agent} />;
+            return <UserMessage key={item.id} item={item} />;
           case "header":
-            return agent ? (
-              <MonoHeader key={item.id} item={item} agent={agent} />
-            ) : (
-              <FoldLine key={item.id} item={item} />
-            );
+            return <FoldLine key={item.id} item={item} />;
           case "work":
             return (
               <View key={item.id} style={styles.work}>
@@ -237,45 +217,16 @@ function Reply({ text, streaming }: { text: string; streaming: boolean }) {
   return <Markdown text={text} streaming={streaming} animate={animate} />;
 }
 
-function DaySeparator({ at }: { at: number }) {
-  const styles = useStyles();
-  const [day, time] = dayStamp(at);
-  return (
-    <View style={styles.daySeparator} accessibilityLabel={`${day} ${time}`}>
-      <View style={styles.dayPill}>
-        <Text style={styles.dayText}>
-          <Text style={styles.dayName}>{day}</Text> {time}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
 function UserMessage({
   item,
-  tail,
 }: {
   item: Extract<TurnItem, { type: "user" }>;
-  tail: boolean;
 }) {
   const styles = useStyles();
   const [singleLine, setSingleLine] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  // In a Mono's chat a few emoji stand alone, like a reaction: no bubble.
-  if (tail && item.emojiOnly) {
-    return (
-      <View style={[styles.userRow, item.compact && styles.userRowCompact]}>
-        <View>
-          <Text style={styles.emoji}>{item.text.trim()}</Text>
-          {item.reaction ? <Reaction emoji={item.reaction} /> : null}
-        </View>
-      </View>
-    );
-  }
-
-  const withTail = tail && !item.compact;
   return (
     <View style={[styles.userRow, item.compact && styles.userRowCompact]}>
       <View
@@ -308,8 +259,6 @@ function UserMessage({
             <Text style={styles.showMore}>{expanded ? "Show less" : "Show more"}</Text>
           </Pressable>
         ) : null}
-        {withTail ? <BubbleTail radius={singleLine ? 18 : 14} /> : null}
-        {item.reaction ? <Reaction emoji={item.reaction} /> : null}
       </View>
       {!item.compact && item.at != null ? (
         <Text style={styles.userTime}>{formatClockTime(item.at)}</Text>
@@ -323,42 +272,13 @@ function isClamped(lines: { text: string }[], text: string) {
   return lines.map((line) => line.text).join("").length < text.replace(/\n/g, "").length;
 }
 
-function BubbleTail({ radius }: { radius: number }) {
-  const colors = useColors();
-  const styles = useStyles();
-  const size = (radius * 4) / 3;
-  return (
-    <View
-      pointerEvents="none"
-      style={[
-        styles.tail,
-        { width: size, height: size, bottom: -radius / 3, transform: [{ scaleX: -1 }] },
-      ]}
-    >
-      <Svg width={size} height={size} viewBox="0 0 24 24">
-        <Path d={TAIL} fill={colors.bubble} />
-      </Svg>
-    </View>
-  );
-}
-
-/** A Mono's emoji answer, on the corner of the message it answers. */
-function Reaction({ emoji }: { emoji: string }) {
-  const styles = useStyles();
-  return (
-    <View style={styles.reaction} accessibilityLabel={`Reacted ${emoji}`}>
-      <Text style={styles.reactionText}>{emoji}</Text>
-    </View>
-  );
-}
-
 /**
  * The line a turn's work folds behind: the provider's mark and the model's
  * clock, ticking while it works and how long it took once done. Tapped open,
  * the work hangs off it on a rail: the agent's notes, muted, between the
  * phases of its work, as on desktop.
  */
-function FoldLine({ item }: { item: HeaderItem }) {
+function FoldLine({ item }: { item: Extract<TurnItem, { type: "header" }> }) {
   const colors = useColors();
   const styles = useStyles();
   const [open, setOpen] = useState(false);
@@ -421,27 +341,6 @@ function FoldLine({ item }: { item: HeaderItem }) {
           ))}
         </View>
       </Collapsible>
-    </View>
-  );
-}
-
-/** A Mono signs its turns with its mascot and name; live, its status runs beside. */
-function MonoHeader({ item, agent }: { item: HeaderItem; agent: TranscriptAgent }) {
-  const styles = useStyles();
-  const signature = (name: string) => (
-    <View style={styles.signature}>
-      <PixelMascot name={agent.mascot} color={agent.color} size={14} />
-      <Text style={styles.signatureName} numberOfLines={1}>
-        {name}
-      </Text>
-    </View>
-  );
-  if (!item.live) return <View style={styles.monoHeader}>{signature(item.label ?? agent.name)}</View>;
-  return (
-    <View style={styles.monoHeader}>
-      <View style={styles.signatureLive}>{signature(agent.name)}</View>
-      <Text style={styles.dot}>·</Text>
-      <Shimmer style={styles.monoStatus}>{item.label ?? "Thinking…"}</Shimmer>
     </View>
   );
 }
@@ -533,26 +432,6 @@ function useElapsed(startedAt: number | undefined) {
 }
 
 const useStyles = themedStyles((colors) => ({
-  daySeparator: {
-    alignItems: "center",
-    paddingTop: 24,
-    paddingBottom: 12,
-  },
-  dayPill: {
-    borderRadius: 999,
-    backgroundColor: withAlpha(colors.content, 0.07),
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-  dayText: {
-    color: withAlpha(colors.content, 0.45),
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  dayName: {
-    color: withAlpha(colors.content, 0.75),
-    fontWeight: "600",
-  },
   userRow: {
     alignItems: "flex-end",
     paddingLeft: 56,
@@ -597,31 +476,6 @@ const useStyles = themedStyles((colors) => ({
     paddingHorizontal: 12,
     color: withAlpha(colors.content, 0.4),
     fontSize: 12,
-  },
-  emoji: {
-    fontSize: 56,
-    lineHeight: 64,
-  },
-  tail: {
-    position: "absolute",
-    right: 0,
-  },
-  reaction: {
-    position: "absolute",
-    top: -10,
-    left: -10,
-    height: 22,
-    paddingHorizontal: 7,
-    borderRadius: 8,
-    borderCurve: "continuous",
-    justifyContent: "center",
-    backgroundColor: colors.surfaceRaised,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.stroke,
-  },
-  reactionText: {
-    fontSize: 11,
-    lineHeight: 14,
   },
   foldLine: {
     flexDirection: "row",
@@ -681,46 +535,6 @@ const useStyles = themedStyles((colors) => ({
   },
   pressed: {
     opacity: 0.6,
-  },
-  monoHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: GUTTER,
-    paddingVertical: 4,
-  },
-  signature: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    alignSelf: "flex-start",
-    maxWidth: "100%",
-    borderRadius: 999,
-    backgroundColor: withAlpha(colors.content, 0.07),
-    paddingVertical: 2,
-    paddingLeft: 8,
-    paddingRight: 12,
-  },
-  signatureLive: {
-    flexShrink: 0,
-    maxWidth: "45%",
-  },
-  signatureName: {
-    flexShrink: 1,
-    color: withAlpha(colors.content, 0.8),
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: "500",
-  },
-  dot: {
-    color: withAlpha(colors.content, 0.25),
-    fontSize: 14,
-  },
-  monoStatus: {
-    flex: 1,
-    color: withAlpha(colors.content, 0.5),
-    fontSize: 14,
-    lineHeight: 20,
   },
   work: {
     paddingHorizontal: GUTTER,

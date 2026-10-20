@@ -295,7 +295,6 @@ describe("btwVisibleBlocks", () => {
       { ...block("hidden-user", "user"), internal: true },
       block("assistant", "assistant"),
       block("reasoning", "reasoning"),
-      { ...block("hidden-tool", "tool"), orchestration: {} as never },
       block("tool", "tool"),
       block("tasks", "tasks"),
       block("plan", "plan"),

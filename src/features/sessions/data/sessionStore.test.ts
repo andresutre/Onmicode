@@ -342,37 +342,6 @@ describe("persisting a subagent's trail", () => {
 });
 
 describe("sanitizeSessionForPersist", () => {
-  it("persists accepted Mono launches on user turns and fingerprints their addition", () => {
-    const session = newSession("codex", "/repo");
-    session.blocks = [{ id: "user", role: "user", text: "Review" }];
-    const before = persistFingerprint(session);
-    const launch = {
-      sessionId: "app-review",
-      cwd: "/repo",
-      title: "Review",
-      harness: "codex" as const,
-      model: "gpt-6",
-    };
-    session.blocks = [
-      { ...session.blocks[0], monoSpawnedSessions: [launch] },
-      {
-        id: "reply",
-        role: "assistant",
-        text: "Started",
-        monoSpawnedSessions: [launch],
-      },
-    ];
-    const saved = sanitizeSessionForPersist(session);
-    expect(saved.blocks[0].monoSpawnedSessions).toEqual([launch]);
-    expect(saved.blocks[1].monoSpawnedSessions).toBeUndefined();
-    expect(persistFingerprint(session)).not.toBe(before);
-    expect(
-      sanitizeSessionForPersist({
-        ...session,
-        blocks: JSON.parse(JSON.stringify(saved.blocks)),
-      }).blocks,
-    ).toEqual(saved.blocks);
-  });
   it("keeps the stripped /operator turn marker for later turns", () => {
     const submitted = appendUser(
       newSession("codex", "/repo"),
@@ -493,36 +462,6 @@ describe("sanitizeSessionForPersist", () => {
       worktreeCwd: "/repo-worktrees/feature",
       worktreeRemoved: true,
     });
-  });
-
-  it("preserves an internal worker's lead, hidden turns, and token metrics", () => {
-    const session = {
-      ...newSession("claude", "/repo"),
-      orchestrationLeadId: "lead",
-    };
-    session.blocks = [
-      {
-        id: "u",
-        role: "user",
-        text: "Bounded assignment",
-        internal: true,
-        turnMetrics: { inputTokens: 100, outputTokens: 20 },
-      },
-    ];
-    const saved = sanitizeSessionForPersist(session);
-    expect(saved.blocks[0]).toMatchObject({
-      orchestrationLeadId: "lead",
-      internal: true,
-      turnMetrics: { inputTokens: 100, outputTokens: 20 },
-    });
-    expect(session.blocks[0].orchestrationLeadId).toBeUndefined();
-    expect(
-      sanitizeSessionForPersist({
-        ...session,
-        orchestrationLeadId: undefined,
-        blocks: saved.blocks,
-      }).blocks[0],
-    ).toEqual(saved.blocks[0]);
   });
   it("persists model provenance recorded on a user turn", () => {
     const session = newSession("claude", "/tmp/project", "claude:opus-5");

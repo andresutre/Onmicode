@@ -5,7 +5,6 @@ import {
   defaultTerminalTitle,
   type TerminalMetaPatch,
 } from "../../terminal/model/terminalTab";
-import type { HarnessId } from "../../sessions/model/session";
 import { pathKey } from "../../../shared/lib/paths";
 
 /**
@@ -44,13 +43,6 @@ export type CommitTabSource = {
   subject: string;
 };
 
-/** One orchestration worker, opened for inspection beside its lead. */
-export type AgentTabSource = {
-  sessionId: string;
-  leadId: string;
-  harness: HarnessId;
-};
-
 export type SessionChangesSource = {
   sessionId: string;
 };
@@ -72,8 +64,6 @@ export type FilePaneTab = {
   sessionChanges?: SessionChangesSource;
   /** Historical commit review (unified diff, read-only). */
   commit?: CommitTabSource;
-  /** Read-only transcript of an orchestration worker. Live only — not persisted. */
-  agent?: AgentTabSource;
   terminal?: boolean;
   /** Foreground command when it isn't the shell. Live only — not persisted. */
   foreground?: string;
@@ -298,15 +288,6 @@ export function openWorkspaceFile(
   };
 }
 
-/** `path` carries the label: an agent tab has no file behind it. */
-export function newAgentTab(
-  title: string,
-  cwd: string,
-  agent: AgentTabSource,
-): FilePaneTab {
-  return { id: crypto.randomUUID(), path: title, cwd, agent };
-}
-
 export function newTerminalFile(
   cwd: string,
   title?: string,
@@ -424,18 +405,11 @@ export function isTerminalTab(file: FilePaneTab): boolean {
   return !!file.terminal;
 }
 
-export function isAgentTab(
-  file: FilePaneTab,
-): file is FilePaneTab & { agent: AgentTabSource } {
-  return !!file.agent;
-}
-
 export function isVirtualDocumentTab(file: FilePaneTab): boolean {
   return (
     isPlanTab(file) ||
     isReleaseNotesTab(file) ||
-    isCommitTab(file) ||
-    isAgentTab(file)
+    isCommitTab(file)
   );
 }
 
@@ -513,7 +487,6 @@ export function isSessionChangesTab(
 
 export function editorTabKey(file: FilePaneTab): string {
   if (file.terminal) return `terminal:${file.id}`;
-  if (file.agent) return `agent:${file.agent.sessionId}`;
   if (file.plan) return `plan:${file.plan.blockId}`;
   if (file.releaseNotes) return `release-notes:${file.releaseNotes.version}`;
   if (file.commit) return `commit:${file.cwd}:${file.commit.sha}`;
@@ -542,7 +515,6 @@ export type OpenEditorTabOptions = {
 export function isPreviewableTab(file: FilePaneTab): boolean {
   return (
     !file.terminal &&
-    !file.agent &&
     !file.plan &&
     !file.releaseNotes &&
     !file.changes

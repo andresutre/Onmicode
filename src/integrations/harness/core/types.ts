@@ -167,13 +167,11 @@ export type HarnessSessionInput = {
   runtimeMode: RuntimeMode;
   /** Keep provider context in memory; MonoCode owns the saved transcript. */
   ephemeral?: boolean;
-  /** Persist Codex context in MonoCode's private Mono store. */
-  codexStore?: "mono";
   intent?: TurnIntent;
   /**
-   * This session drives MonoCode's control CLI, which reaches the app over
-   * loopback. Sandboxes deny network by default, so a lead that cannot open
-   * that socket cannot supervise its agents at all.
+   * This session drives MonoCode's app CLI, which reaches the app over
+   * loopback. Sandboxes deny network by default, so a turn that cannot open
+   * that socket cannot use /operator at all.
    */
   controlsAgents?: boolean;
   /** Grants this normal turn access to MonoCode's scoped app CLI. */

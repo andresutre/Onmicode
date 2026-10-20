@@ -19,18 +19,9 @@ export function appViewForTab(id: string): AppView | undefined {
     : undefined;
 }
 
-/** A Mono open as a title tab in the inset layout. */
-export function monoTabId(monoId: string): string {
-  return `mono:${monoId}`;
-}
-
-export function monoForTab(id: string): string | undefined {
-  return id.startsWith("mono:") ? id.slice("mono:".length) : undefined;
-}
-
 /** Whether a title tab is a view of its own rather than a workspace tab. */
 export function isViewTab(id: string): boolean {
-  return !!appViewForTab(id) || !!monoForTab(id);
+  return !!appViewForTab(id);
 }
 
 /** Keep the shared order and append newly opened tabs regardless of type. */

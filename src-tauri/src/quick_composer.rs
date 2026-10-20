@@ -483,17 +483,8 @@ fn launch_target(app: &AppHandle) -> Option<WebviewWindow> {
         .cloned()
 }
 
+/// Show the composer, or put it away when it is already showing.
 fn toggle(app: &AppHandle) {
-    reveal(app, true);
-}
-
-/// Show the composer from the menu bar, where a second click should not
-/// put it away again.
-pub fn open(app: &AppHandle) {
-    reveal(app, false);
-}
-
-fn reveal(app: &AppHandle, toggle: bool) {
     if app
         .state::<QuickComposerState>()
         .capturing
@@ -504,7 +495,7 @@ fn reveal(app: &AppHandle, toggle: bool) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(panel) = handle.get_webview_window(QUICK_COMPOSER_LABEL) {
-            if toggle && panel.is_visible().unwrap_or(false) {
+            if panel.is_visible().unwrap_or(false) {
                 git_popup::dismiss(&handle, false);
                 let _ = panel.hide();
                 return;

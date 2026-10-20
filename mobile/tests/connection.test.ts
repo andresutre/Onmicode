@@ -6,38 +6,32 @@ import {
 import { parseInvitation } from "@/features/connection/invitation";
 const catalog = {
   projects: [{ id: "a" }, { id: "b" }],
-  monos: [{ id: "m" }, { id: "n" }],
   sessions: [
     { id: "s1", projectId: "a" },
     { id: "s2", projectId: "b" },
-    { id: "s3", projectId: "b", monoId: "m" },
   ],
 };
 describe("mobile workspace choices", () => {
-  it("keeps project selection isolated while mono support is disabled", () => {
-    const selected = selectedWorkspace(catalog, {
-      projectIds: ["a"],
-      monoIds: ["m"],
-    });
+  it("keeps only the chosen projects and their sessions", () => {
+    const selected = selectedWorkspace(catalog, { projectIds: ["a"] });
     expect(selected.projects).toEqual([{ id: "a" }]);
-    expect(selected.monos).toEqual([]);
     expect(selected.sessions.map((session) => session.id)).toEqual(["s1"]);
   });
   it("preserves an explicit empty choice on restore", () => {
     const restored = normalizeSelection(
-      JSON.parse(JSON.stringify({ projectIds: [], monoIds: [] })),
+      JSON.parse(JSON.stringify({ projectIds: [] })),
     );
-    expect(restored).toEqual({ projectIds: [], monoIds: [] });
+    expect(restored).toEqual({ projectIds: [] });
     expect(selectedWorkspace(catalog, restored).projects).toEqual([]);
-    expect(normalizeSelection({ projectIds: "all", monoIds: [] })).toBeNull();
+    expect(normalizeSelection({ projectIds: "all" })).toBeNull();
   });
   it("retains unavailable choices so they can reappear when a desktop project returns", () => {
     const chosen = normalizeSelection({
       projectIds: ["a", "a", 5, "later"],
+      // Saved by older versions that had Monos; ignored now.
       monoIds: ["m"],
     });
-    expect(chosen?.projectIds).toEqual(["a", "later"]);
-    expect(chosen?.monoIds).toEqual(["m"]);
+    expect(chosen).toEqual({ projectIds: ["a", "later"] });
     expect(
       selectedWorkspace(
         { ...catalog, projects: [...catalog.projects, { id: "later" }] },

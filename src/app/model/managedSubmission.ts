@@ -1,4 +1,9 @@
-import type { ControlOutcome } from "../../features/orchestration/model/orchestration";
+/** How an app-submitted turn ended. */
+export type ControlOutcome = {
+  status: "completed" | "failed" | "cancelled";
+  text: string;
+  error?: string;
+};
 import type { SubmissionAcceptance } from "./submissionAcceptance";
 
 /** Await acceptance and guarantee one terminal callback, including rejection

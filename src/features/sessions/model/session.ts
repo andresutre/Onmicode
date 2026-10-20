@@ -4,7 +4,6 @@ import type { HandoffComposerCard } from "./handoff";
 import type { InboxComposerCard } from "../../inbox/model/githubTasks";
 import type { InboxAskContext } from "../../inbox/model/inboxAsk";
 import type { NoteCardMeta, NoteComposerCard } from "../../notes";
-import type { OrchestrationProposal } from "../../orchestration/model/orchestrationPlan";
 import type { LinkedWorkItemUpdateCard } from "../../inbox/model/linkedWorkItemActivity";
 import {
   defaultSessionChoice,
@@ -54,15 +53,6 @@ export type BlockRole =
   | "system"
   | "handoff";
 
-/** A session created by a Mono during this conversation turn. */
-export type MonoSpawnedSession = {
-  sessionId: string;
-  cwd: string;
-  title: string;
-  harness: HarnessId;
-  model: string;
-};
-
 export type TaskListItemStatus =
   "pending" | "in_progress" | "completed" | "cancelled";
 
@@ -83,7 +73,7 @@ export type TaskListMeta = {
 };
 
 /** One-shot behavior selected in the composer for the next harness turn. */
-export type TurnIntent = "default" | "plan" | "build" | "orchestrate";
+export type TurnIntent = "default" | "plan" | "build";
 export type EditedResendRejection = {
   /** The provider removed the old turn, so retry as a normal unsent prompt. */
   providerRewound: boolean;
@@ -263,25 +253,13 @@ export type Attachment = {
   previewUrl?: string;
 };
 
-export type MonoSessionCompletion = {
-  sessionId: string;
-  title: string;
-  status: "completed" | "failed" | "cancelled";
-  /** A single report covering several sessions launched in one Mono turn. */
-  sessionCount?: number;
-};
-
 export type QueuedMessage = {
   id: string;
-  /** User bubble already shown optimistically in a Mono's conversation. */
-  blockId?: string;
   text: string;
   attachments: Attachment[];
   noteCard?: NoteComposerCard;
   handoffCard?: HandoffComposerCard;
   intent?: TurnIntent;
-  /** An app notification that must wait for an idle Mono, never steer its work. */
-  monoSessionCompletion?: MonoSessionCompletion;
   /** Delivery failed; the message remains available to retry or edit. */
   error?: string;
 };
@@ -334,8 +312,8 @@ export type Block = {
   draft?: boolean;
   /** This user turn activated MonoCode app access for its thread. */
   monocode?: boolean;
-  /** The Plan or Orchestrator mode this user turn was sent in. */
-  intent?: Extract<TurnIntent, "plan" | "orchestrate">;
+  /** The Plan mode this user turn was sent in. */
+  intent?: Extract<TurnIntent, "plan">;
   /** Stable CLI request that submitted this turn, for safe retries. */
   appRequestId?: string;
   /** Provider-reported token metrics for this user turn, when available. */
@@ -362,26 +340,17 @@ export type Block = {
   agentRun?: AgentRunMeta;
   taskList?: TaskListMeta;
   plan?: PlanBlockMeta;
-  orchestration?: OrchestrationProposal;
-  /** Parent conversation for an internal orchestration worker. */
-  orchestrationLeadId?: string;
   /**
-   * A turn the app wrote on the user's behalf to keep an orchestration moving.
+   * A turn the app wrote on the user's behalf.
    * The harness needs it; the transcript hides it, so a run reads as one
    * conversation rather than the user narrating their own agents.
    */
   internal?: boolean;
-  /** Hidden app prompt that starts a separate completion report in a Mono chat. */
-  monoSessionCompletion?: MonoSessionCompletion;
-  /** Accepted session launches, kept on the originating user turn. */
-  monoSpawnedSessions?: MonoSpawnedSession[];
   handoff?: HandoffMeta;
   secondOpinion?: SecondOpinionMeta;
   /** Independent read-only side conversations anchored to this user turn. */
   btwThreads?: BtwThread[];
   noteCard?: NoteCardMeta;
-  /** Saved artifacts attached to this turn; their bodies live outside chat. */
-  artifactCards?: import("../../artifacts/artifacts").ArtifactCard[];
   /** Exact CI repair instructions and evidence supplied with this user turn. */
   ciContext?: string;
   /** Mid-turn interjection chrome; system blocks only. Body lives in text. */
@@ -392,15 +361,6 @@ export type Block = {
    */
   notice?: "error" | "interrupt";
   statusKey?: string;
-  /** Posted to a Mono's chat by one of its habits, outside any turn. */
-  monoHabit?: { id: string; name: string; at: number };
-  /** A card a Mono put in its chat; see `features/monos/model/monoCards`. */
-  monoCard?: import("../../monos/model/monoCards").MonoCard;
-  /**
-   * The emoji a Mono answered this user message with. Drawn from its reply
-   * when the chat renders; see `features/monos/model/monoReaction`.
-   */
-  monoReaction?: string;
 };
 
 export type RuntimeMode =
@@ -445,8 +405,6 @@ export type Session = {
   sidebarHidden?: boolean;
   /** Receipt for an acknowledged floating-composer handoff. */
   quickLaunchAccepted?: boolean;
-  /** Internal worker: displayed in its lead's panel rather than a workspace tab. */
-  orchestrationLeadId?: string;
   /** Temporary Inbox conversation: shares the runtime, never saved as a session. */
   inboxAsk?: InboxAskContext;
   id: string;
@@ -458,8 +416,6 @@ export type Session = {
   /** Project / working directory for this session. */
   cwd: string;
   blocks: Block[];
-  /** Mono-only database window. Older blocks are fetched separately by the viewer. */
-  monoTranscript?: { before: number | null; firstBlockId: string | null };
   /** True while a harness turn is in flight. */
   busy?: boolean;
   /** The provider has accepted this turn and can take live follow-ups. */
@@ -481,7 +437,6 @@ export type Session = {
   usageLimit?: UsageLimit;
   /**
    * Lives only in memory: never saved, never listed with the project's chats.
-   * A Mono's habit runs are, and disappear when the run ends.
    */
   ephemeral?: boolean;
   /** Provider-side conversation id (Cursor ACP session id). */

@@ -55,7 +55,6 @@ import { QuickModelSelector } from "./QuickModelSelector";
 import { QuickPermissionIcon, QuickPermissions } from "./QuickPermissions";
 import { useQuickPickerMotion } from "./useQuickPickerMotion";
 import { OPERATOR_COMMAND } from "../../sessions/model/operatorCommand";
-import { ORCHESTRATOR_COMMAND } from "../../sessions/model/orchestratorCommand";
 import { PLAN_COMMAND } from "../../sessions/model/plan";
 import { DRAFT_COMMAND } from "../../sessions/model/draftCommand";
 import {
@@ -90,7 +89,6 @@ const PROMPT_MAX_HEIGHT = 220;
 const MODE_COMMANDS = [
   PLAN_COMMAND,
   OPERATOR_COMMAND,
-  ORCHESTRATOR_COMMAND,
   DRAFT_COMMAND,
 ];
 const MODE_NAMES: ReadonlySet<string> = new Set(
@@ -371,9 +369,7 @@ export function QuickComposer({ onShown }: { onShown: () => void }) {
         ...(launchMode.mode === DRAFT_COMMAND.name ? { draft: true } : {}),
         ...(launchMode.mode === PLAN_COMMAND.name
           ? { intent: "plan" as const }
-          : launchMode.mode === ORCHESTRATOR_COMMAND.name
-            ? { intent: "orchestrate" as const }
-            : {}),
+          : {}),
         cwd,
         ...picked,
         modelSettings: settings,

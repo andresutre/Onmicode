@@ -66,12 +66,14 @@ fn public(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v) => {
             let octets = v.octets();
-            !v.is_private()
-                && !v.is_loopback()
-                && !v.is_link_local()
-                && !v.is_unspecified()
-                && !v.is_multicast()
-                && !(octets[0] == 100 && (64..=127).contains(&octets[1]))
+            // Carrier-grade NAT (100.64.0.0/10) is shared space, not public.
+            let shared = octets[0] == 100 && (64..=127).contains(&octets[1]);
+            !(v.is_private()
+                || v.is_loopback()
+                || v.is_link_local()
+                || v.is_unspecified()
+                || v.is_multicast()
+                || shared)
         }
         IpAddr::V6(v) => {
             !v.is_loopback()

@@ -13,7 +13,6 @@ import {
   revealPath,
 } from "../../../platform/tauri/fs";
 import {
-  isAgentTab,
   isChangesTab,
   isCommitTab,
   isFilesystemTab,
@@ -38,7 +37,6 @@ import {
 } from "../../files/ui/ExplorerMenu";
 import { FileActionError } from "../../files/ui/FileActionError";
 import { FileTypeIcon } from "../../files/ui/FileTypeIcon";
-import { HarnessIcon } from "../../sessions/ui/HarnessIcon";
 import { TabLabel } from "../../../shared/ui/TabLabel";
 
 type Props = {
@@ -141,16 +139,6 @@ export function surfaceTabPresentation(
       label: "Session Changes",
       iconName: "CHANGES",
       tooltip: "Changes captured for this session only",
-    };
-  }
-
-  if (isAgentTab(file)) {
-    const name = file.path.trim() || "Agent";
-    return {
-      name,
-      label: name,
-      iconName: "AGENT",
-      tooltip: `${name} — orchestration agent`,
     };
   }
 
@@ -302,7 +290,6 @@ export function SurfaceTabs({
           const commit = isCommitTab(file);
           const review = isReviewTab(file) && !changes;
           const terminal = isTerminalTab(file);
-          const agent = isAgentTab(file) ? file.agent : null;
           const { label, iconName, tooltip } = surfaceTabPresentation(file);
           const tab = (
             <div
@@ -371,11 +358,6 @@ export function SurfaceTabs({
               >
                 {terminal ? (
                   <Terminal className="size-3.5 shrink-0" strokeWidth={1.75} />
-                ) : agent ? (
-                  <HarnessIcon
-                    harness={agent.harness}
-                    className="size-3.5 shrink-0"
-                  />
                 ) : changes || commit || review ? (
                   <GitCompare
                     className="size-3.5 shrink-0"

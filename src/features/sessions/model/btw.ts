@@ -294,7 +294,7 @@ export function btwVisibleBlocks(
   const end = blocks.findIndex((block) => block.id === sourceEndBlockId);
   if (end < 0) return [];
   return blocks.slice(0, end + 1).filter((block) => {
-    if (block.internal || block.orchestration) return false;
+    if (block.internal) return false;
     if (PRIVATE_ROLES[block.role]) return false;
     return !!SNAPSHOT_ROLES[block.role];
   });

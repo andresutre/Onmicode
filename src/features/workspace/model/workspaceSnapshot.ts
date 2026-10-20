@@ -4,7 +4,6 @@ import {
 } from "../../sessions/model/inFlight";
 import {
   closeLeaf,
-  isAgentTab,
   isTerminalTab,
   leafIds,
   newTab,
@@ -145,10 +144,13 @@ function parseProjectReturnTargets(raw: unknown): ProjectReturnMemory {
   return memory;
 }
 
+/** Tabs older builds saved for watching an orchestration worker. */
+const isAgentTab = (file: FilePaneTab) => "agent" in file && !!file.agent;
+
 /**
- * Agent tabs watch a live worker, and a run does not outlive the window that
- * started it. Dropping them in `sanitizeFile` would strand an empty pane and
- * cost the whole workspace tab on restore, so the pane is closed here instead.
+ * Older builds saved tabs that watched a live orchestration worker. Dropping
+ * them in `sanitizeFile` would strand an empty pane and cost the whole
+ * workspace tab on restore, so the pane is closed here instead.
  */
 function withoutAgentTabs(tabs: WorkspaceTab[]): WorkspaceTab[] {
   return tabs.flatMap((tab) => {

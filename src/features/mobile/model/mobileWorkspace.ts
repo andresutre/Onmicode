@@ -37,7 +37,6 @@ import {
   loadPinnedProjects,
   sameProjectPath,
 } from "../../projects/model/recents";
-import { listMonos, monoLook, monoState } from "../../monos/model/mono";
 import { displayPath, pathKey, projectName } from "../../../shared/lib/paths";
 import {
   getSession,
@@ -92,12 +91,10 @@ export async function mobileCatalog(
   live: readonly Session[],
   runtimeMode?: RuntimeMode,
 ) {
-  const roster = listMonos();
   const paths = [
     ...new Set([
       ...loadRecents().map((project) => project.path),
       ...loadPinnedProjects(),
-      ...roster.flatMap((mono) => mono.projects),
     ]),
   ].filter((path) => path && path !== "~");
   const colors = loadTabGroupColors();
@@ -127,21 +124,11 @@ export async function mobileCatalog(
   ).flat();
   const sessions = new Map<string, ReturnType<typeof mobileSummary>>();
   for (const summary of summaries) {
-    if (
-      !summary.archived &&
-      !summary.sidebarHidden &&
-      !summary.orchestrationLeadId
-    )
+    if (!summary.archived && !summary.sidebarHidden)
       sessions.set(summary.id, mobileSummary(summary));
   }
   for (const session of live) {
-    if (
-      session.inboxAsk ||
-      session.orchestrationLeadId ||
-      session.sidebarHidden ||
-      roster.some((mono) => mono.sessionId === session.id)
-    )
-      continue;
+    if (session.inboxAsk || session.sidebarHidden) continue;
     if (paths.some((path) => sameProjectPath(path, session.cwd)))
       sessions.set(session.id, {
         id: session.id,
@@ -166,40 +153,10 @@ export async function mobileCatalog(
         live: true,
       });
   }
-  const monos = await Promise.all(
-    roster.map(async (mono) => {
-      const session =
-        live.find((session) => session.id === mono.sessionId) ??
-        (mono.sessionId
-          ? await getSession(mono.sessionId).catch(() => undefined)
-          : undefined);
-      const messages = session ? mobileMessages(session) : [];
-      const last = messages[messages.length - 1];
-      const lastActiveAt = session
-        ? ([...session.blocks].reverse().find((block) => block.startedAt)
-            ?.startedAt ?? 0)
-        : 0;
-      return {
-        id: mono.id,
-        name: monoLook(mono).name,
-        mascot: mono.mascot,
-        color: mono.color,
-        projectIds: mono.projects.map(mobileProjectId),
-        unread: 0,
-        status: session ? monoState(session).status : "idle",
-        busy: !!session?.busy,
-        live: live.some((current) => current.id === mono.sessionId),
-        sessionId: mono.sessionId,
-        harness: session?.harness,
-        model: session?.model,
-        lastMessage: last?.text ?? "",
-        lastActiveAt,
-      };
-    }),
-  );
   return {
     projects,
-    monos,
+    // Older phone apps still read this list.
+    monos: [],
     sessions: [...sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt),
   };
 }
@@ -251,25 +208,16 @@ export async function mobileConversation(
   saved?: Map<string, Session>,
   range?: (turnIds: string[]) => [number, number],
 ) {
-  const mono = id.startsWith("mono:")
-    ? listMonos().find((mono) => mono.id === id.slice(5))
-    : undefined;
-  if (id.startsWith("mono:") && !mono)
-    throw new Error("Mono is no longer available");
-  const sessionId = mono ? mono.sessionId : id;
-  const session = sessionId
-    ? (live.find((session) => session.id === sessionId) ??
-      (await readSaved(sessionId, saved)))
-    : undefined;
+  if (id.startsWith("mono:")) throw new Error("Mono is no longer available");
+  const session =
+    live.find((session) => session.id === id) ?? (await readSaved(id, saved));
   return {
     id,
     messages: session ? mobileMessages(session) : [],
     turns: session
       ? mobileTranscript(session, {
           busy: !!session.busy,
-          mono: mono ? { name: monoLook(mono).name } : undefined,
           pendingQuestion: !!session.pendingQuestion,
-          backgroundTasks: session.backgroundTasks,
           range,
         })
       : [],
@@ -294,15 +242,11 @@ export async function mobileModels(
   );
   let current: Session | undefined;
   if (params.conversationId) {
-    const mono = params.conversationId.startsWith("mono:")
-      ? listMonos().find((mono) => mono.id === params.conversationId!.slice(5))
-      : undefined;
-    const sessionId = mono ? mono.sessionId : params.conversationId;
-    current = sessionId
-      ? (live.find((session) => session.id === sessionId) ??
-        (await readSaved(sessionId, saved)) ??
-        undefined)
-      : undefined;
+    const sessionId = params.conversationId;
+    current =
+      live.find((session) => session.id === sessionId) ??
+      (await readSaved(sessionId, saved)) ??
+      undefined;
   }
   if (!current) {
     const path = mobileProjectPaths().find(
@@ -434,7 +378,6 @@ function mobileProjectPaths() {
   return [
     ...loadRecents().map((project) => project.path),
     ...loadPinnedProjects(),
-    ...listMonos().flatMap((mono) => mono.projects),
   ];
 }
 

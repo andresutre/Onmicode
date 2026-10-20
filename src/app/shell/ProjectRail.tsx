@@ -95,7 +95,6 @@ import {
 } from "../../features/connections/model/connections";
 import { remoteProjectFor } from "../../features/connections/model/remoteProjects";
 import { useProjectMenu } from "./useProjectMenu";
-import { MonoRailSection, type MonoRailProps } from "./MonoRailSection";
 
 type Props = {
   visible?: boolean;
@@ -144,8 +143,6 @@ type Props = {
   updateNotice?: InstalledUpdate | null;
   onOpenWhatsNew?: (version: string) => void;
   onDismissUpdate?: () => void;
-  /** The Monos section above the projects; absent while Monos are off. */
-  monos?: MonoRailProps;
 };
 
 export function ProjectRail({
@@ -185,7 +182,6 @@ export function ProjectRail({
   updateNotice = null,
   onOpenWhatsNew,
   onDismissUpdate,
-  monos,
 }: Props) {
   const trafficLightsVisible = useTrafficLightsVisible();
   const resize = useDragResize({
@@ -364,8 +360,7 @@ export function ProjectRail({
     searchActive ||
     inboxActive ||
     notesActive ||
-    automationsActive ||
-    !!monos?.activeId;
+    automationsActive;
   const pinnedIds = sections.pinned.map((item) => item.path);
   const projectIds = groupedProjectSections.ungrouped.map((item) => item.path);
   const groupIds = groupedProjectSections.grouped.map(({ group }) => group.id);
@@ -459,8 +454,6 @@ export function ProjectRail({
             }}
             className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none pb-2"
           >
-            {monos ? <MonoRailSection {...monos} /> : null}
-
             {sections.pinned.length > 0 ? (
               <ProjectSection
                 label="Pinned"

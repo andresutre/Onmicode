@@ -5,7 +5,6 @@ import {
   modalStackOptions,
   sheetScreenLayout,
 } from "@/features/files/codeScreen";
-import { MONOS_ENABLED } from "@/features/connection/selection";
 import { useColors } from "@/ui/theme";
 
 // Settings: a native modal with its own stack, so its pages push inside the
@@ -37,7 +36,7 @@ export default function SettingsLayout() {
       <Stack.Screen name="models" options={{ title: "" }} />
       <Stack.Screen
         name="workspace"
-        options={{ title: MONOS_ENABLED ? "Projects and monos" : "Projects" }}
+        options={{ title: "Projects" }}
       />
     </Stack>
   );

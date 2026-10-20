@@ -14,7 +14,6 @@ import * as SecureStore from "expo-secure-store";
 import Storage from "expo-sqlite/kv-store";
 import type {
   Project,
-  Mono,
   SessionSummary,
   Message,
   Turn,
@@ -31,11 +30,10 @@ import { normalizeSelection, type MobileSelection } from "./selection";
 
 export type Catalog = {
   projects: Project[];
-  monos: Mono[];
   sessions: SessionSummary[];
   addresses?: Desktop["addresses"];
 };
-const EMPTY: Catalog = { projects: [], monos: [], sessions: [] };
+const EMPTY: Catalog = { projects: [], sessions: [] };
 const PAIRING = "monocode.mobile.pairing";
 const IDENTITY = "monocode.mobile.identity";
 const key = (fingerprint: string, kind: string) =>
@@ -111,7 +109,6 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       if (active.current !== value || version !== generation.current) return;
       if (
         !Array.isArray(next.projects) ||
-        !Array.isArray(next.monos) ||
         !Array.isArray(next.sessions)
       )
         throw new Error("Desktop sent an invalid workspace");
@@ -121,7 +118,12 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       }
       // The poll repeats every few seconds; only a changed workspace is saved
       // and re-rendered.
-      const { addresses: _, ...workspace } = next;
+      // Older desktops also send Monos, which this app no longer has.
+      const {
+        addresses: _,
+        monos: __,
+        ...workspace
+      } = next as Catalog & { monos?: unknown };
       const serialized = JSON.stringify(workspace);
       if (serialized !== lastCatalog.current) {
         await Storage.setItem(key(value.desktop.fingerprint, "catalog"), serialized);
@@ -288,14 +290,13 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   return <Context value={value}>{children}</Context>;
 }
 /**
- * The new catalog, keeping the projects, monos and sessions that did not
+ * The new catalog, keeping the projects and sessions that did not
  * change as they were, so rows memoized on them skip re-rendering.
  */
 function withUnchanged(previous: Catalog, next: Catalog): Catalog {
   return {
     ...next,
     projects: sameItems(previous.projects, next.projects),
-    monos: sameItems(previous.monos, next.monos),
     sessions: sameItems(previous.sessions, next.sessions),
   };
 }

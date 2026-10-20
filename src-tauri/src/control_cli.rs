@@ -1,88 +1,12 @@
-//! The desktop executable also provides a small, JSON-only control client.
+//! The desktop executable also provides a small, JSON-only client for
+//! /operator app access.
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
 use serde_json::{json, Value};
 
-const USAGE: &str = r#"MonoCode local control — supervise this orchestration run from the lead agent.
-
-Usage: {exe} control ACTION [--json JSON | --input FILE|-] [--request-id ID]
-
-Actions, with the JSON object each one takes:
-  list      {}
-            The run, every task with its status and latest result, and the
-            harness/model IDs you may assign.
-  delegate  {"title":"Short title","harness":"<id from list>",
-             "model":"<id from list>","prompt":"Self-contained instructions",
-             "files":["src/feature"],"dependsOn":["<taskId>"]}
-            Queue a worker and return its taskId. "model" is optional and
-            defaults to the first model list allows for that harness.
-            "files" is the write scope: project-relative paths, where a
-            directory covers its descendants and ["."] reserves the whole
-            checkout. "dependsOn" holds taskIds that must be reviewed first.
-  get       {"taskId":"..."}
-            One task, including its latest result.
-  wait      {"timeoutSeconds":20}
-            Block until a task changes state, or until the timeout (0-25).
-            Returns at once when paused, stopped, or nothing is running or queued.
-  respond   {"taskId":"...","requestId":7,"decision":"allow"|"deny"}
-            Answer an approval an agent is blocked on. Agents never prompt the
-            user; list, get and wait report the prompt as that task's
-            "needsInput", and it stays stopped until you decide.
-  answer    {"taskId":"...","requestId":9,"answers":{"<questionId>":["<optionId>"]}}
-            Answer a question an agent asked, or pass "skip":true instead of
-            "answers". The question and its options come from needsInput.
-  steer     {"taskId":"...","text":"..."}
-            Redirect an agent that is still running, without discarding the
-            work it has already done. Use this the moment you see it going
-            the wrong way; message only lands once it has stopped.
-  message   {"taskId":"...","text":"..."}
-            Send a stopped worker another turn within its existing scope; it
-            keeps its session, checkout and history.
-  retry     {"taskId":"...","text":"...","files":["src/feature"]}
-            Retry a stopped worker with corrected project-relative write
-            scopes. Use this only when the additional files are required.
-  cancel    {"taskId":"..."}
-            Cancel a task, whether it is running or still queued.
-  review    {"taskId":"..."}
-            Accept a completed task's result.
-  finish    {}
-            End the run, once every task is accepted or cancelled.
-
-Usual loop: list -> delegate ... -> wait or get -> steer an agent that drifts,
-unblock one with respond or answer -> inspect the changes yourself -> message
-for corrections -> review each task -> finish.
-
-When paused, list, get and wait still return the reason and recovery steps.
-Do not keep polling or retry mutations. Explain the pause and ask the user to
-click Resume in MonoCode. Resume continues interrupted workers in their
-retained checkouts. A policy-blocked worker remains stopped until message,
-retry or cancel explicitly resolves it.
-
-Output is one JSON line: {"ok":true,"result":...} or {"ok":false,"error":"..."}.
-The exit code is 0 only when "ok" is true.
-
-Input must be a JSON object; unknown fields are rejected rather than ignored.
---json takes it inline, --input FILE reads a file, --input - reads stdin.
-
-Every call carries a request ID, and the run applies each ID at most once. A
-failed response reports the ID it used whenever the outcome is unknown — a
-timeout, say. Retry that exact call with --request-id ID; retrying a delegate
-under a fresh ID instead would queue a second worker.
-
-Tasks run inside the MonoCode app, not in this process. Exiting this CLI, or a
-failure here, never cancels a task that was already accepted.
-
-MonoCode sets MONOCODE_CONTROL_ENDPOINT and MONOCODE_CONTROL_TOKEN for the lead
-agent's process only. They are already in your environment; never print them.
-"#;
-
-const ACTIONS: [&str; 12] = [
-    "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
-    "respond", "answer",
-];
-const APP_ACTIONS: [&str; 32] = [
+const APP_ACTIONS: [&str; 16] = [
     "models.list",
     "sessions.list",
     "sessions.read",
@@ -99,30 +23,10 @@ const APP_ACTIONS: [&str; 32] = [
     "notes.list",
     "notes.read",
     "notes.write",
-    "artifacts.list",
-    "artifacts.read",
-    "artifacts.write",
-    "soul.read",
-    "soul.update",
-    "memory.read",
-    "memory.search",
-    "memory.add",
-    "memory.replace",
-    "memory.remove",
-    "habits.list",
-    "habits.add",
-    "habits.update",
-    "habits.run",
-    "habits.remove",
-    "chat.card",
 ];
 const APP_USAGE: &str = r#"MonoCode app access — use in a thread enabled by /operator.
 
 Usage: {exe} app ACTION [--json JSON | --input FILE|-] [--request-id ID]
-
-A Mono works on several projects: add "project":"<path or name>" to the
-sessions.*, worktrees.* and folders.* actions to choose which one. It may be
-left out when the Mono has a single project.
 
 Actions:
   models.list    {}  Available providers, models, settings and permission modes.
@@ -132,11 +36,9 @@ Actions:
                   reasoning are omitted. Omit before for the newest page;
                   pass nextBefore from a result for older exchanges. maxChars
                   caps each message (200-6000, default 1200).
-  sessions.send  {"sessionId":"...","prompt":"...","notifyOnComplete":true}
+  sessions.send  {"sessionId":"...","prompt":"..."}
                   Submit a follow-up to an idle session in this project.
                   A busy session is rejected. Reuse --request-id on retries.
-                  Optional notifyOnComplete:true asks for a completion report
-                  in the calling Mono's chat. It waits until that Mono is idle.
   sessions.draft {"sessionId":"...","prompt":"..."}
                   Save an unsent draft in an idle project session. Existing
                   drafts are preserved; send or remove one in MonoCode first.
@@ -155,19 +57,6 @@ Actions:
                   session in this project, including one just created. Set
                   draft:true to save the prompt unsent; no agent turn runs.
                   Otherwise the turn is submitted.
-                  Submitted sessions notify the calling Mono by default when
-                  this turn completes, fails or is cancelled. The Mono reviews
-                  it and reports back once idle. Set notifyOnComplete:false
-                  when the user asks not to receive a report. Drafts do not
-                  notify; notifyOnComplete:true cannot be combined with draft:true.
-                  Sessions monitored during the same Mono turn form one group:
-                  their results arrive together after every session stops.
-                  The Mono reviews the whole group and gives one combined report.
-                  Rejected launches or follow-ups return a CLI error without
-                  a later completion report. When a Mono successfully stops,
-                  archives or deletes a monitored session, its pending report
-                  for that session is dismissed; acknowledge the action in
-                  the current reply. Other sessions' reports are kept.
                   Returns after creation/acceptance, not agent completion;
                   use its ID with folders.move immediately. Optional model,
                   effort, modelSettings, permission mode and workspace choice
@@ -191,9 +80,8 @@ Actions:
                   Stop the session if running and permanently delete its
                   saved conversation. Open files, terminals and worktrees
                   are kept. Reuse --request-id on retries.
-                  stop, archive and delete cannot target the calling session,
-                  Mono chats, habit runs or orchestration workers. Sessions
-                  must belong to the chosen project.
+                  stop, archive and delete cannot target the calling session.
+                  Sessions must belong to this project.
   worktrees.list {}  Working copies in this project, with paths and branches.
   worktrees.create {"branch":"feature/name","base":"HEAD","existing":false}
                   Create a worktree on a named new branch from base (a branch
@@ -210,58 +98,6 @@ Actions:
                   to derive it from the body. Use {"id":"...","body":"..."}
                   to edit an existing note; title and tags are also optional.
                   Omitted fields stay unchanged. Reuse --request-id on retries.
-  artifacts.list {"limit":30,"offset":0}  Mono or habit only. Saved artifact titles.
-  artifacts.read {"id":"..."}  Full content of one artifact.
-  artifacts.write {"kind":"document","title":"PR review",
-                   "summary":"Merge queue and blockers",
-                   "body":"<complete Markdown>"}
-                  Save a document and attach its card below your chat reply.
-                  Artifacts are separate from Notes. Currently only kind "document"
-                  (Markdown) is supported. Reply briefly; do not
-                  repeat the document body in chat. Returns metadata only.
-                  To revise, pass {"id":"...","body":"<updated Markdown>"};
-                  omitted title stays unchanged. Reuse --request-id on retries.
-  soul.read      {}  Mono's own conversation only. Current SOUL.md text and hash.
-  soul.update    {"text":"<complete Markdown>","expectedHash":"<hash from soul.read>"}
-                  Update your standing instructions only when the user asks.
-                  Preserve the other instructions. If the file changed since
-                  soul.read, read it again and reapply the requested changes.
-                  Habit runs and other sessions cannot change a Mono's soul.
-  memory.read    {"topic":"releases"}  Mono only. Without topic:
-                  MEMORY.md, how much of it loads, and the topic names.
-  memory.search  {"query":"release tags","since":"7d"}
-                  Entries across MEMORY.md, topic notes and the archive that
-                  share words with query, best first. since is a date or a
-                  span (24h, 7d, 2w) and keeps dated entries from then on.
-  memory.add     {"fact":"...","topic":"releases","until":"2026-11-01"}
-                  Add one dated entry to MEMORY.md, or to a topic file when
-                  topic is set. until is optional, for facts that expire.
-                  Oldest entries move to the archive when MEMORY.md is full.
-  memory.replace {"find":"text of the old entry","fact":"...","topic":"..."}
-                  Strike the one entry containing find through and add fact.
-  memory.remove  {"find":"text of the entry","topic":"..."}
-                  Delete the one entry containing find, for a wrong entry.
-  habits.list    {}  Mono only. Your habits: what each does, when it runs
-                  next, and how its last run went.
-  habits.add     {"name":"Morning CI check","instructions":"...",
-                  "schedule":{"kind":"weekdays","time":"09:00"}}
-                  Add only after the user agreed to it in this chat. kind is
-                  hourly (with "minute"), daily, weekdays or weekly (with
-                  "dayOfWeek", 0 = Sunday); time is local 24-hour HH:MM.
-                  Each run is a hidden session that posts to this chat only
-                  when it has something worth saying.
-  habits.update  {"id":"...","name":"...","instructions":"...",
-                  "schedule":{...},"enabled":false}  Change or pause one.
-  habits.run     {"id":"..."}  Run one within a minute, to try it out.
-  habits.remove  {"id":"..."}
-  chat.card      Mono or habit only. Post a card to the Mono's chat:
-                  {"type":"pr","repo":"owner/repo","number":123,"note":"..."}
-                  {"type":"session","sessionId":"...","note":"..."}
-                  {"type":"choices","options":["First choice","Second choice"]}
-                  {"type":"habit","name":"...","instructions":"...",
-                   "schedule":{"kind":"daily","time":"09:00"}}
-                  choices accepts 1–4 options. A habit card is a suggestion;
-                  the user must start it before it is scheduled.
 
 The output is one JSON line: {"ok":true,"result":...} or {"ok":false,"error":"..."}.
 Use --input - to pass JSON on stdin. Never print MonoCode credentials.
@@ -290,13 +126,6 @@ fn quoted(value: &str) -> String {
     }
 }
 
-pub fn help() -> String {
-    let exe = std::env::current_exe()
-        .map(|path| quoted(&path.to_string_lossy()))
-        .unwrap_or_else(|_| "monocode".into());
-    USAGE.replace("{exe}", &exe)
-}
-
 pub fn app_help() -> String {
     let exe = std::env::current_exe()
         .map(|path| quoted(&path.to_string_lossy()))
@@ -309,16 +138,8 @@ enum Parsed {
     Call(String, Value, String),
 }
 
-pub fn run(args: Vec<String>) -> i32 {
-    run_mode(args, false)
-}
-
 pub fn run_app(args: Vec<String>) -> i32 {
-    run_mode(args, true)
-}
-
-fn run_mode(args: Vec<String>, app_mode: bool) -> i32 {
-    let parsed = match parse_args_for(&args, app_mode) {
+    let parsed = match parse_args(&args) {
         Ok(parsed) => parsed,
         Err(error) => {
             println!("{}", json!({"ok": false, "error": error}));
@@ -327,12 +148,12 @@ fn run_mode(args: Vec<String>, app_mode: bool) -> i32 {
     };
     let (action, input, request_id) = match parsed {
         Parsed::Help => {
-            println!("{}", if app_mode { app_help() } else { help() });
+            println!("{}", app_help());
             return 0;
         }
         Parsed::Call(action, input, request_id) => (action, input, request_id),
     };
-    match send(&action, &input, &request_id, app_mode) {
+    match send(&action, &input, &request_id) {
         Ok(mut value) => {
             if value.get("ok").and_then(Value::as_bool) == Some(true) {
                 println!("{value}");
@@ -391,25 +212,10 @@ fn sent(error: impl Into<String>) -> Failure {
     }
 }
 
-fn send(action: &str, input: &Value, request_id: &str, app_mode: bool) -> Result<Value, Failure> {
-    let endpoint_key = if app_mode {
-        "MONOCODE_APP_ENDPOINT"
-    } else {
-        "MONOCODE_CONTROL_ENDPOINT"
-    };
-    let token_key = if app_mode {
-        "MONOCODE_APP_TOKEN"
-    } else {
-        "MONOCODE_CONTROL_TOKEN"
-    };
-    let endpoint = std::env::var(endpoint_key).map_err(|_| {
-        unsent(if app_mode {
-            "No MonoCode app connection. Start this agent turn in MonoCode."
-        } else {
-            "No MonoCode connection. Confirm the Orchestrator proposal in MonoCode first."
-        })
-    })?;
-    let token = std::env::var(token_key)
+fn send(action: &str, input: &Value, request_id: &str) -> Result<Value, Failure> {
+    let endpoint = std::env::var("MONOCODE_APP_ENDPOINT")
+        .map_err(|_| unsent("No MonoCode app connection. Start this agent turn in MonoCode."))?;
+    let token = std::env::var("MONOCODE_APP_TOKEN")
         .map_err(|_| unsent("No MonoCode session credential. Start the agent from MonoCode."))?;
     let address: SocketAddr = endpoint
         .parse()
@@ -432,11 +238,11 @@ fn send(action: &str, input: &Value, request_id: &str, app_mode: bool) -> Result
     writeln!(
         stream,
         "{}",
-        json!({"token":token,"action":action,"input":input,"requestId":request_id,"namespace":if app_mode { "app" } else { "control" }})
+        json!({"token":token,"action":action,"input":input,"requestId":request_id,"namespace":"app"})
     )
     .map_err(|e| sent(e.to_string()))?;
     let mut line = String::new();
-    let max_response: u64 = if app_mode { 4_000_000 } else { 2_000_000 };
+    let max_response: u64 = 4_000_000;
     BufReader::new(stream)
         .take(max_response + 1)
         .read_line(&mut line)
@@ -460,12 +266,7 @@ fn read_capped(mut source: impl Read) -> Result<String, String> {
     Ok(raw)
 }
 
-#[cfg(test)]
 fn parse_args(args: &[String]) -> Result<Parsed, String> {
-    parse_args_for(args, false)
-}
-
-fn parse_args_for(args: &[String], app_mode: bool) -> Result<Parsed, String> {
     let is_help = |value: &str| matches!(value, "help" | "--help" | "-h");
     let Some(action) = args.first() else {
         return Ok(Parsed::Help);
@@ -474,20 +275,10 @@ fn parse_args_for(args: &[String], app_mode: bool) -> Result<Parsed, String> {
         return Ok(Parsed::Help);
     }
     let action = action.clone();
-    let allowed = if app_mode {
-        APP_ACTIONS.contains(&action.as_str())
-    } else {
-        ACTIONS.contains(&action.as_str())
-    };
-    if !allowed {
-        let names = if app_mode {
-            APP_ACTIONS.join(", ")
-        } else {
-            ACTIONS.join(", ")
-        };
+    if !APP_ACTIONS.contains(&action.as_str()) {
         return Err(format!(
-            "Unknown action: {action}. Use one of: {names}. Run {} --help.",
-            if app_mode { "app" } else { "control" }
+            "Unknown action: {action}. Use one of: {}. Run app --help.",
+            APP_ACTIONS.join(", ")
         ));
     }
     let mut input = None;
@@ -495,7 +286,7 @@ fn parse_args_for(args: &[String], app_mode: bool) -> Result<Parsed, String> {
     let mut index = 1;
     while index < args.len() {
         let flag = &args[index];
-        // `control delegate --help` should explain the command, not fail.
+        // `app sessions.start --help` should explain the command, not fail.
         if is_help(flag) {
             return Ok(Parsed::Help);
         }
@@ -505,7 +296,7 @@ fn parse_args_for(args: &[String], app_mode: bool) -> Result<Parsed, String> {
             ));
         }
         let value = args.get(index + 1).ok_or_else(|| {
-            format!("Missing value for {flag}. Run control --help for the argument list.")
+            format!("Missing value for {flag}. Run app --help for the argument list.")
         })?;
         match flag.as_str() {
             "--request-id" => request_id = value.clone(),
@@ -524,7 +315,7 @@ fn parse_args_for(args: &[String], app_mode: bool) -> Result<Parsed, String> {
                     read_capped(std::fs::File::open(value).map_err(|e| e.to_string())?)?
                 };
                 let parsed: Value = serde_json::from_str(&raw)
-                    .map_err(|e| format!("Invalid JSON: {e}. Pass one JSON object, e.g. --json '{{\"taskId\":\"...\"}}'."))?;
+                    .map_err(|e| format!("Invalid JSON: {e}. Pass one JSON object, e.g. --json '{{\"sessionId\":\"...\"}}'."))?;
                 if !parsed.is_object() {
                     return Err("Input must be a JSON object".into());
                 }
@@ -541,10 +332,9 @@ fn parse_args_for(args: &[String], app_mode: bool) -> Result<Parsed, String> {
     if request_id.is_empty() || request_id.len() > 128 {
         return Err("Invalid request ID".into());
     }
-    if app_mode
-        && !request_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    if !request_id
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
     {
         return Err("App request IDs may contain only letters, digits, - and _".into());
     }
@@ -570,7 +360,7 @@ mod tests {
     #[test]
     fn validates_inputs_without_invoking_a_shell() {
         let (_, input, id) = call(&[
-            "delegate",
+            "sessions.start",
             "--json",
             r#"{"prompt":"$(touch nope) `hello`\nnext"}"#,
             "--request-id",
@@ -579,8 +369,8 @@ mod tests {
         .unwrap();
         assert_eq!(id, "retry-1");
         assert_eq!(input["prompt"], "$(touch nope) `hello`\nnext");
-        assert!(call(&["delegate", "--json", "[]"]).is_err());
-        assert!(call(&["delegate", "--json", "{}", "--json", "{}"]).is_err());
+        assert!(call(&["sessions.start", "--json", "[]"]).is_err());
+        assert!(call(&["sessions.start", "--json", "{}", "--json", "{}"]).is_err());
         assert!(call(&["unknown"]).is_err());
     }
     #[test]
@@ -589,31 +379,24 @@ mod tests {
         assert!(matches!(parse_args(&args(&["--help"])), Ok(Parsed::Help)));
         // Agents commonly probe a subcommand for its own usage text.
         assert!(matches!(
-            parse_args(&args(&["delegate", "--help"])),
+            parse_args(&args(&["sessions.start", "--help"])),
             Ok(Parsed::Help)
         ));
-        assert!(call(&["get", r#"{"taskId":"x"}"#])
+        assert!(call(&["sessions.read", r#"{"sessionId":"x"}"#])
             .unwrap_err()
             .contains("--json"));
-        assert!(call(&["get", "--json"]).unwrap_err().contains("--help"));
-        assert!(call(&["get", "--taskId", "x"])
+        assert!(call(&["sessions.read", "--json"])
+            .unwrap_err()
+            .contains("--help"));
+        assert!(call(&["sessions.read", "--sessionId", "x"])
             .unwrap_err()
             .contains("Unknown option"));
-        assert!(call(&["get", "--json", "{taskId}"])
+        assert!(call(&["sessions.read", "--json", "{sessionId}"])
             .unwrap_err()
             .contains("Invalid JSON"));
     }
     #[test]
-    fn help_names_every_action_and_the_real_executable() {
-        let text = help();
-        for action in ACTIONS {
-            assert!(text.contains(action), "help omits {action}");
-        }
-        assert!(!text.contains("{exe}"));
-        assert!(text.contains("--request-id"));
-    }
-    #[test]
-    fn quotes_the_control_path_only_when_the_shell_needs_it() {
+    fn quotes_the_cli_path_only_when_the_shell_needs_it() {
         assert_eq!(
             quoted("/Applications/MonoCode.app/Contents/MacOS/monocode"),
             "/Applications/MonoCode.app/Contents/MacOS/monocode"
@@ -629,51 +412,33 @@ mod tests {
         assert_eq!(quoted("/Users/it's/MonoCode"), r"'/Users/it'\''s/MonoCode'");
     }
     #[test]
-    fn app_mode_exposes_only_app_actions_and_safe_request_ids() {
-        assert!(matches!(
-            parse_args_for(&args(&["notes.list"]), true),
-            Ok(Parsed::Call(_, _, _))
-        ));
-        for action in [
-            "sessions.read",
-            "sessions.send",
-            "sessions.draft",
-            "sessions.stop",
-            "sessions.archive",
-            "sessions.delete",
-        ] {
+    fn help_documents_every_action_and_safe_request_ids() {
+        let help = app_help();
+        for action in APP_ACTIONS {
+            assert!(help.contains(action), "help omits {action}");
             assert!(matches!(
-                parse_args_for(&args(&[action, "--json", r#"{"sessionId":"other"}"#]), true),
+                parse_args(&args(&[action, "--json", r#"{"sessionId":"other"}"#])),
                 Ok(Parsed::Call(_, _, _))
             ));
-            assert!(app_help().contains(action));
-            assert!(parse_args_for(&args(&[action]), false).is_err());
         }
-        assert!(app_help().contains("draft:true"));
-        assert!(app_help().contains("inherit this"));
-        assert!(parse_args_for(&args(&["delegate"]), true).is_err());
-        assert!(
-            parse_args_for(&args(&["sessions.start", "--request-id", "bad/id"]), true).is_err()
-        );
-        assert!(app_help().contains("notes.read"));
-        assert!(app_help().contains("notes.write"));
-        for action in [
-            "worktrees.list",
-            "worktrees.create",
-            "artifacts.list",
-            "artifacts.read",
-            "artifacts.write",
+        assert!(!help.contains("{exe}"));
+        assert!(help.contains("draft:true"));
+        assert!(help.contains("inherit this"));
+        for removed in [
+            "delegate",
+            "artifacts.",
+            "soul.",
+            "memory.",
+            "habits.",
+            "chat.card",
+            "Mono ",
+            "Mono's",
         ] {
-            assert!(matches!(
-                parse_args_for(&args(&[action]), true),
-                Ok(Parsed::Call(_, _, _))
-            ));
-            assert!(app_help().contains(action));
+            assert!(!help.contains(removed), "help still mentions {removed}");
         }
-        assert!(app_help().contains(r#""kind":"document""#));
-        assert!(app_help().contains("Artifacts are separate from Notes"));
+        assert!(parse_args(&args(&["delegate"])).is_err());
+        assert!(parse_args(&args(&["sessions.start", "--request-id", "bad/id"])).is_err());
     }
-
     #[test]
     fn inactive_app_turn_does_not_suggest_retries() {
         let denied = with_retry_hint(json!({"ok":false,"retryable":false}), "id-1");
@@ -681,51 +446,5 @@ mod tests {
         assert!(denied.get("requestId").is_none());
         let uncertain = with_retry_hint(json!({"ok":false,"error":"timeout"}), "id-1");
         assert_eq!(uncertain["retryWith"], "--request-id id-1");
-    }
-
-    #[test]
-    fn app_mode_accepts_chat_cards_and_documents_every_type() {
-        for input in [
-            r#"{"type":"pr","repo":"owner/repo","number":123}"#,
-            r#"{"type":"session","sessionId":"other"}"#,
-            r#"{"type":"choices","options":["Review","Ship"]}"#,
-            r#"{"type":"habit","name":"Check CI","instructions":"Check CI","schedule":{"kind":"daily","time":"09:00"}}"#,
-        ] {
-            assert!(matches!(
-                parse_args_for(&args(&["chat.card", "--json", input]), true),
-                Ok(Parsed::Call(action, parsed_input, _))
-                    if action == "chat.card"
-                        && parsed_input == serde_json::from_str::<Value>(input).unwrap()
-            ));
-        }
-        assert!(parse_args_for(&args(&["chat.card"]), false).is_err());
-        let help = app_help();
-        assert!(help.contains("chat.card"));
-        for kind in ["pr", "session", "choices", "habit"] {
-            assert!(help.contains(&format!(r#""type":"{kind}""#)));
-        }
-    }
-
-    #[test]
-    fn app_mode_exposes_soul_actions_and_documents_requested_updates() {
-        for (action, input) in [
-            ("soul.read", r#"{}"#),
-            (
-                "soul.update",
-                r##"{"text":"# Soul\n","expectedHash":"old-hash"}"##,
-            ),
-        ] {
-            assert!(matches!(
-                parse_args_for(&args(&[action, "--json", input]), true),
-                Ok(Parsed::Call(parsed_action, parsed_input, _))
-                    if parsed_action == action
-                        && parsed_input == serde_json::from_str::<Value>(input).unwrap()
-            ));
-            assert!(parse_args_for(&args(&[action]), false).is_err());
-            assert!(app_help().contains(action));
-        }
-        assert!(app_help().contains("only when the user asks"));
-        assert!(app_help().contains("expectedHash"));
-        assert!(app_help().contains("Habit runs and other sessions cannot change"));
     }
 }
