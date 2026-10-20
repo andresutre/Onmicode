@@ -249,6 +249,9 @@ localStorage.setItem("monocode.pacedReveal", "0");
 localStorage.setItem("monocode.diffViewer", "unified");
 localStorage.setItem("monocode.measureNavigation", "1");
 localStorage.setItem("monocode.measureStreaming", "1");
+// `?empty` looks like a fresh install; only `?welcome` wants first-run setup.
+if (!params.has("welcome"))
+  localStorage.setItem("monocode.welcomeCompleted", "1");
 const sessions = Array.from({ length: 6 }, (_, index) => {
   const blocks: Block[] = Array.from({ length: 100 }, (_, turn) => [
     {

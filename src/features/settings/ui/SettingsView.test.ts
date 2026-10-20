@@ -665,6 +665,20 @@ describe("settings pages", () => {
     expect(localStorage.getItem("monocode.tabAnimationsEnabled")).toBe("1");
   });
 
+  it("reopens the welcome from General", async () => {
+    await render("general");
+    const opened = vi.fn();
+    window.addEventListener("monocode:open-welcome", opened);
+    const show = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        '[data-setting-id="welcome"] button',
+      ),
+    ).find((button) => button.textContent === "Show welcome")!;
+    await act(async () => show.click());
+    window.removeEventListener("monocode:open-welcome", opened);
+    expect(opened).toHaveBeenCalledOnce();
+  });
+
   it("defaults to the icon rail and lets users hide it", async () => {
     await render("appearance");
     let control = container.querySelector<HTMLElement>(

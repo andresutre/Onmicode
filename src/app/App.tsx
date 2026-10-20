@@ -577,6 +577,9 @@ import { PaneTree } from "../features/workspace/ui/PaneTree";
 import { SessionPane } from "../features/sessions/ui/SessionPane";
 import { SessionSurface } from "../features/sessions/ui/SessionSurface";
 import { ProjectTerminalDock } from "../features/terminal/ui/ProjectTerminalDock";
+import { useWelcome } from "../features/welcome/hooks/useWelcome";
+import { openWelcome } from "../features/welcome/model/welcome";
+import { WelcomeDialog } from "../features/welcome/ui/lazyWelcomeDialog";
 import { lazySurface } from "../shared/ui/lazySurface";
 import { preloadNavigationWhenIdle } from "./model/preloadNavigation";
 import { requestTranscriptJump } from "../features/sessions/model/transcriptJump";
@@ -1183,6 +1186,11 @@ function Workspace({
   });
   const [updateNotice, setUpdateNotice] = useState(installedUpdate);
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
+  const welcome = useWelcome({
+    transferred: windowTransfer != null,
+    resumed: resumed != null,
+    sessions: bootHistory.length,
+  });
   useLayoutEffect(() => {
     if (!insetLayout) return;
     setTitleTabOrder((order) =>
@@ -10425,6 +10433,7 @@ function Workspace({
       "zoom-reset": () => zoomTo(UI_SCALE_DEFAULT),
       "new-window": () => void invoke("open_new_window"),
       "check-updates": () => void runUpdateFlow(true),
+      "show-welcome": openWelcome,
       reload: a.onReload,
     };
     const command = commands[id];
@@ -11811,14 +11820,17 @@ function Workspace({
             }
             onHeightChange={setHarnessUpdateHeight}
           />
-          <NewLayoutNotice
-            topOffset={
-              12 +
-              (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0) +
-              (harnessUpdateHeight ? harnessUpdateHeight + 8 : 0)
-            }
-            onHeightChange={setNewLayoutNoticeHeight}
-          />
+          {/* The welcome offers the layout itself; one prompt at a time. */}
+          {welcome.open ? null : (
+            <NewLayoutNotice
+              topOffset={
+                12 +
+                (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0) +
+                (harnessUpdateHeight ? harnessUpdateHeight + 8 : 0)
+              }
+              onHeightChange={setNewLayoutNoticeHeight}
+            />
+          )}
           <ResourcePressureNotice
             sessions={sessionsRef}
             onStopAgent={(id) => onStop(id)}
@@ -11868,6 +11880,16 @@ function Workspace({
               key={providerSignInRequest.key}
               harness={providerSignInRequest.harness}
               onClose={() => setProviderSignInRequest(null)}
+            />
+          ) : null}
+          {welcome.open ? (
+            <WelcomeDialog
+              onFinish={(projects) => {
+                welcome.close();
+                if (projects.length === 0) return;
+                setSettingsOpen(false);
+                openProjects(projects);
+              }}
             />
           ) : null}
         </div>

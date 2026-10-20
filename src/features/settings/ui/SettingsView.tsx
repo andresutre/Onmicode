@@ -192,6 +192,7 @@ import {
   refreshHarnessCatalogs,
 } from "../../../integrations/harness/core/registry";
 import { loginHarness } from "../../../integrations/harness/core/auth";
+import { openWelcome } from "../../welcome/model/welcome";
 import {
   defaultModelId,
   firstEnabledHarness,
@@ -1022,6 +1023,13 @@ function GeneralPage({
 
       <Group title="About">
         <UpdateRow onOpenWhatsNew={onOpenWhatsNew} />
+        <Row
+          id="welcome"
+          label="Welcome"
+          description="Go through setup again: your coding agents, a first project and the look."
+        >
+          <SecondaryButton onClick={openWelcome}>Show welcome</SecondaryButton>
+        </Row>
       </Group>
     </>
   );

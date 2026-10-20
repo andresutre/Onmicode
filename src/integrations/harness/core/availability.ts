@@ -33,24 +33,42 @@ export {
 
 /**
  * We only ever check whether the binary exists, never whether it is
- * authenticated, so the hint must not blame a login.
+ * authenticated, so the hint must not blame a login. `install` is a shell
+ * command; `steps` is prose for a CLI that has no one-line installer.
  */
-const CLI: Record<HarnessId, { name: string; install?: string }> = {
-  claude: { name: "Claude Code CLI" },
-  codex: { name: "Codex CLI" },
-  cursor: { name: "Cursor CLI" },
+const CLI: Record<
+  HarnessId,
+  { name: string; install?: string; steps?: string }
+> = {
+  claude: {
+    name: "Claude Code CLI",
+    install: IS_WIN
+      ? "irm https://claude.ai/install.ps1 | iex"
+      : "curl -fsSL https://claude.ai/install.sh | bash",
+  },
+  codex: {
+    name: "Codex CLI",
+    install: IS_WIN
+      ? "irm https://chatgpt.com/codex/install.ps1 | iex"
+      : "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+  },
+  cursor: {
+    name: "Cursor CLI",
+    install: IS_WIN
+      ? "irm 'https://cursor.com/install?win32=true' | iex"
+      : "curl https://cursor.com/install -fsS | bash",
+  },
   grok: {
     name: "Grok Build CLI",
     install: "curl -fsSL https://x.ai/cli/install.sh | bash",
   },
-  opencode: { name: "OpenCode CLI" },
+  opencode: { name: "OpenCode CLI", install: "npm i -g opencode-ai" },
   pi: { name: "Pi CLI", install: "npm i -g @earendil-works/pi-coding-agent" },
   omp: { name: "omp CLI", install: "curl -fsSL https://omp.sh/install | sh" },
   fx: { name: "fx CLI", install: "curl -fsSL https://fx.sh/setup.sh | bash" },
   hermes: {
     name: "Hermes Agent CLI",
-    install:
-      "Install from hermes-agent.nousresearch.com, then run hermes model",
+    steps: "Install from hermes-agent.nousresearch.com, then run hermes model",
   },
   antigravity: { name: "Antigravity ACP server (agy_acp_server.par)" },
   devin: {
@@ -72,9 +90,19 @@ let inflight: Promise<void> | null = null;
 const PROBE_TTL_MS = 30_000;
 
 export function harnessUnavailableHint(id: HarnessId): string {
-  const { name, install } = CLI[id];
-  const how = install ? ` (\`${install}\`)` : "";
+  const { name, install, steps } = CLI[id];
+  const how = install ? ` (\`${install}\`)` : steps ? ` (${steps})` : "";
   return `${name} not found${how}. Install it, or restart MonoCode if it is already installed.`;
+}
+
+/** How to install a missing CLI: a command to copy, or steps to follow. */
+export function harnessInstallGuide(id: HarnessId): {
+  name: string;
+  command?: string;
+  steps?: string;
+} {
+  const { name, install, steps } = CLI[id];
+  return { name, command: install, steps };
 }
 
 export function probeHarnessAvailability(
