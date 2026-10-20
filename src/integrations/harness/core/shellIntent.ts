@@ -159,6 +159,243 @@ export function rewriteReadableTitle(
   return `${verb} ${path || match[2]}`;
 }
 
+/**
+ * What a command runs, for a summary line: "tests" when it plainly runs a test
+ * suite, otherwise the program doing the work, so `cd app && npx vitest run`
+ * reads as tests and `FOO=1 git status` as git. Undefined when the first real
+ * command is not a plain program name (a description a harness used as the
+ * title, a variable, a subshell), so the caller keeps its generic wording.
+ */
+export function commandSubject(command: string): string | undefined {
+  const text = unwrapShellCommand(command);
+  if (!text || text.length > MAX_COMMAND_CHARS) return undefined;
+  for (const chain of splitTopLevel(text, chainSep)) {
+    // A pipeline is named for the command that feeds it.
+    const stage = splitTopLevel(chain, pipeSep)[0];
+    const tokens = stage ? tokenize(stage) : null;
+    if (!tokens || tokens.length === 0) return undefined;
+    const argv = programArgv(tokens.map(({ value }) => value));
+    if (argv === "setup") continue;
+    return argv ? subjectOf(argv) : undefined;
+  }
+  return undefined;
+}
+
+/** Commands that only set the stage for the one after them. */
+const SETUP_BINS = new Set([
+  "cd",
+  "pushd",
+  "popd",
+  "export",
+  "unset",
+  "set",
+  "source",
+  ".",
+  "alias",
+  "true",
+  ":",
+  "echo",
+  "printf",
+  "pwd",
+  "clear",
+  "sleep",
+  "set-location",
+  "push-location",
+  "pop-location",
+]);
+
+/** Programs that run the program named after their options, and those options' values. */
+const LAUNCHERS: Record<string, ReadonlySet<string>> = {
+  env: new Set(["-u", "--unset", "-C", "--chdir"]),
+  sudo: new Set(["-u", "--user", "-g", "--group", "-C", "-D", "--chdir"]),
+  nice: new Set(["-n", "--adjustment"]),
+  nohup: new Set(),
+  time: new Set(["-f", "--format", "-o", "--output"]),
+  exec: new Set(["-a"]),
+  command: new Set(),
+  builtin: new Set(),
+  timeout: new Set(["-s", "--signal", "-k", "--kill-after"]),
+  npx: new Set(["-p", "--package"]),
+  pnpx: new Set(["-p", "--package"]),
+  bunx: new Set(["-p", "--package"]),
+  uvx: new Set(["--from", "--with", "-p", "--python"]),
+};
+
+/** Package managers' "run this binary" subcommands: `pnpm exec vitest`. */
+const LAUNCH_SUBCOMMANDS: Record<string, ReadonlySet<string>> = {
+  npm: new Set(["exec", "x"]),
+  pnpm: new Set(["exec", "dlx"]),
+  yarn: new Set(["exec", "dlx"]),
+  bun: new Set(["x"]),
+  uv: new Set(["run"]),
+  poetry: new Set(["run"]),
+  pipenv: new Set(["run"]),
+  bundle: new Set(["exec"]),
+};
+
+/** The argv of the program that does the work, past assignments and launchers. */
+function programArgv(argv: string[]): string[] | "setup" | undefined {
+  let index = 0;
+  // PowerShell assignments (`$env:CI = 1`) and POSIX ones (`CI=1 npm test`).
+  if (argv[0]?.startsWith("$")) {
+    return /=/.test(argv.join(" ")) ? "setup" : undefined;
+  }
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[index] ?? "")) index += 1;
+  if (index >= argv.length) return "setup";
+  for (let depth = 0; depth < 4 && index < argv.length; depth += 1) {
+    const bin = programKey(argv[index]);
+    const valueFlags = LAUNCHERS[bin];
+    if (valueFlags) {
+      index += 1;
+      while (index < argv.length) {
+        const arg = argv[index];
+        if (arg === "--") {
+          index += 1;
+          break;
+        }
+        if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(arg)) index += 1;
+        else if (valueFlags.has(arg)) index += 2;
+        else if (arg.startsWith("-")) index += 1;
+        else if (bin === "timeout" && /^\d+(?:\.\d+)?[smhd]?$/.test(arg)) {
+          index += 1;
+        } else break;
+      }
+      continue;
+    }
+    const subcommands = LAUNCH_SUBCOMMANDS[bin];
+    // Options before the binary may take values we cannot tell apart from
+    // it, so only the plain form names the binary; the rest stays the tool.
+    const launched = argv[index + 2];
+    if (
+      subcommands?.has(argv[index + 1] ?? "") &&
+      launched &&
+      !launched.startsWith("-")
+    ) {
+      index += 2;
+      continue;
+    }
+    break;
+  }
+  const rest = argv.slice(index);
+  if (rest.length === 0) return undefined;
+  return SETUP_BINS.has(programKey(rest[0])) ? "setup" : rest;
+}
+
+/**
+ * A program's name as typed, without its directory, Windows extension, or the
+ * version `npx` was asked for.
+ */
+function programName(token: string): string {
+  const base = token.replace(/\\/g, "/").split("/").pop() ?? token;
+  return base
+    .replace(/\.(?:exe|cmd|bat|com)$/i, "")
+    .replace(/^(.+?)@.*$/, "$1");
+}
+
+function programKey(token: string): string {
+  return programName(token).toLowerCase();
+}
+
+/** Names that say a shell ran something, not what it ran. */
+const GENERIC_PROGRAMS = new Set([
+  "sh",
+  "bash",
+  "zsh",
+  "dash",
+  "ksh",
+  "fish",
+  "cmd",
+  "powershell",
+  "pwsh",
+  "shell",
+  "terminal",
+  "command",
+  "execute",
+  "run",
+  "tool",
+]);
+
+/**
+ * Lowercase names and PowerShell cmdlets read as programs. Anything else (a
+ * capitalised word like "Run" or "Terminal") is a harness describing the call,
+ * not the call itself.
+ */
+function looksLikeProgram(token: string, name: string): boolean {
+  if (GENERIC_PROGRAMS.has(name.toLowerCase())) return false;
+  if (/^[a-z0-9_][a-z0-9_.+-]*$/.test(name)) return true;
+  if (/^[A-Z][a-z]+-[A-Z][A-Za-z]+$/.test(name)) return true;
+  // A path or a Windows executable is a program whatever its case.
+  return /[\\/]|\.(?:exe|cmd|bat|com)$/i.test(token) && /^[\w.+-]+$/.test(name);
+}
+
+const TEST_RUNNERS = new Set([
+  "vitest",
+  "jest",
+  "pytest",
+  "py.test",
+  "mocha",
+  "ava",
+  "rspec",
+  "phpunit",
+  "ctest",
+  "tox",
+  "nox",
+]);
+
+/** Tools whose `test` subcommand runs the project's tests: `cargo test`. */
+const TEST_SUBCOMMAND_BINS = new Set([
+  "cargo",
+  "go",
+  "dotnet",
+  "mix",
+  "deno",
+  "bun",
+  "swift",
+  "mvn",
+  "mvnw",
+  "gradle",
+  "gradlew",
+  "make",
+  "playwright",
+  "flutter",
+  "dart",
+  "zig",
+  "npm",
+  "pnpm",
+  "yarn",
+]);
+
+const SCRIPT_RUNNERS = new Set(["npm", "pnpm", "yarn", "bun"]);
+
+function subjectOf(argv: string[]): string | undefined {
+  const name = programName(argv[0]);
+  if (!looksLikeProgram(argv[0], name)) return undefined;
+  const bin = name.toLowerCase();
+  if (TEST_RUNNERS.has(bin)) return "tests";
+  const operands = argv.slice(1).filter((arg) => !arg.startsWith("-"));
+  const [first, second] = operands;
+  if (TEST_SUBCOMMAND_BINS.has(bin)) {
+    if (first === "test" || (bin === "cargo" && first === "nextest")) {
+      return "tests";
+    }
+    if (bin === "npm" && first === "t") return "tests";
+    if (
+      SCRIPT_RUNNERS.has(bin) &&
+      first === "run" &&
+      /^test(?::|$)/.test(second ?? "")
+    ) {
+      return "tests";
+    }
+  }
+  if (/^(?:python[\d.]*|py)$/.test(bin)) {
+    const module = argv[argv.indexOf("-m") + 1];
+    if (argv.includes("-m") && (module === "pytest" || module === "unittest")) {
+      return "tests";
+    }
+  }
+  return name;
+}
+
 type Classified = ShellIntent | "noise" | "opaque";
 
 function classifyArgv(argv: string[]): Classified {

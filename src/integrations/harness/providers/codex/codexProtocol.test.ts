@@ -303,6 +303,23 @@ describe("mapCodexNotification", () => {
     expect(mapped.events).toEqual([{ type: "message.delta", text: "\n\n" }]);
   });
 
+  it("streams command output as chunks to join, not output to replace", () => {
+    expect(
+      mapCodexNotification("item/commandExecution/outputDelta", {
+        itemId: "cmd_1",
+        delta: " ✓ a.test.ts\n",
+      }).events,
+    ).toEqual([
+      {
+        type: "tool.updated",
+        callId: "cmd_1",
+        kind: "execute",
+        outputDelta: " ✓ a.test.ts\n",
+        status: "in_progress",
+      },
+    ]);
+  });
+
   it("maps completed image generation items as image events", () => {
     const item = {
       id: "image_1",

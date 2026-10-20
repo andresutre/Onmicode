@@ -444,7 +444,8 @@ export function mapCodexNotification(
           type: "tool.updated",
           callId: itemId,
           kind: "execute",
-          detail: delta,
+          // Each delta is only the newest chunk, so it joins the output so far.
+          outputDelta: delta,
           status: "in_progress",
         },
       ],

@@ -7,6 +7,7 @@ import {
   isSearchTool,
   isWeakToolTitle,
 } from "../../../integrations/harness/core/preview";
+import { commandSubject } from "../../../integrations/harness/core/shellIntent";
 import { leafName } from "../../files/model/fileName";
 import {
   displayPath,
@@ -742,6 +743,8 @@ type PhaseTally = {
   edits: Set<string>;
   searches: number;
   runs: number;
+  /** What the first command ran, so a group with one names it: "Ran tests". */
+  runSubject?: string;
   /** Commands the agent left running when it yielded, and how many still are. */
   background: number;
   backgroundLive: number;
@@ -794,7 +797,10 @@ function tallySteps(steps: Block[]): PhaseTally {
         if (block.tool?.background) {
           tally.background += 1;
           if (toolCallState(block) === "pending") tally.backgroundLive += 1;
-        } else tally.runs += 1;
+        } else {
+          tally.runs += 1;
+          if (tally.runs === 1) tally.runSubject = commandSubject(label);
+        }
         break;
       case "research":
         if (/^Find\b/i.test(label) || isSearchTool(kind, title, preview)) {
@@ -814,7 +820,10 @@ function fileLabel(paths: Set<string>): string {
   return `${paths.size} files`;
 }
 
-/** What the calls of one kind add up to: "Edited 2 files", "Ran 3 commands". */
+/**
+ * What the calls of one kind add up to: "Edited 2 files", "Ran 3 commands",
+ * "Ran tests".
+ */
 function workSummary(
   kind: ActivityWorkKind,
   tally: PhaseTally,
@@ -836,10 +845,9 @@ function workSummary(
       if (tally.runs === 0 && tally.background > 0) {
         return "Finished in background";
       }
+      // One command is named for what it ran, the way one file is named.
       return tally.runs === 1
-        ? live
-          ? "Running a command"
-          : "Ran a command"
+        ? `${live ? "Running" : "Ran"} ${tally.runSubject ?? "a command"}`
         : `${live ? "Running" : "Ran"} ${tally.runs} commands`;
     case "agent":
       return tally.agents === 1
@@ -866,7 +874,7 @@ function currentWorkKind(steps: Block[]): ActivityWorkKind | undefined {
 
 /**
  * What a run of work adds up to, one clause per kind: "Read 3 files · Edited 2
- * files · Ran a command". While the run is live, the clause for the call in
+ * files · Ran tests". While the run is live, the clause for the call in
  * flight is present tense, so "Running 2 commands" settles to "Ran 2 commands"
  * when it folds. Interjections the turn absorbed ride along as a trailing
  * "N notes" clause; a group holding nothing but notes is just that clause.
@@ -891,6 +899,20 @@ export function workSummaryLine(steps: Block[], live = false): string {
     ...tally.order.map((kind) => workSummary(kind, tally, kind === running)),
     ...(notes ? [notes] : []),
   ].join(" · ");
+}
+
+/**
+ * True when the last call a group made did not work. A failure the agent went
+ * on to recover from is history; the one a group ended on is where its work
+ * stopped, and a folded header should still say so.
+ */
+export function endedOnFailure(steps: Block[]): boolean {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const block = steps[index];
+    if (!isToolBlock(block)) continue;
+    return !needsApproval(block) && toolCallState(block) === "rejected";
+  }
+  return false;
 }
 
 /** The icon a run of work answers to: whatever it did most of. */
