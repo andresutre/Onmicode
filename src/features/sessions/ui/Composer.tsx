@@ -6,10 +6,12 @@ import {
   CursorMagicSelection,
   FilePlus,
   Plus,
+  Share,
   Square,
   StickyNote,
   X,
 } from "../../../shared/ui/icons";
+import { copyPromptLink } from "../../prompt-links/model/promptLinkSession";
 import {
   useCallback,
   useEffect,
@@ -2277,6 +2279,25 @@ export function Composer({
                       ) : null}
                     </button>
                   ) : null}
+                  <div role="separator" className="my-1 h-px bg-content/10" />
+                  <button
+                    type="button"
+                    disabled={!draft.trim()}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setPlusOpen(false);
+                      void copyPromptLink({ prompt: draft, cwd, harness, model });
+                    }}
+                    className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left text-content hover:bg-content/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Share className="mt-0.5 size-4 shrink-0 text-content/60" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px]">Copy prompt link</span>
+                      <span className="block truncate whitespace-nowrap text-[11px] leading-4 text-content/45">
+                        Share this message as an Onmicode link
+                      </span>
+                    </span>
+                  </button>
                 </Popover>
               ) : null}
             </div>

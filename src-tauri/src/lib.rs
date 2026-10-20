@@ -35,6 +35,7 @@ mod notifications;
 mod pasteboard;
 mod pi_usage;
 mod project_logo;
+mod prompt_links;
 mod provider_session_transfer;
 mod pty;
 #[cfg(target_os = "macos")]
@@ -252,12 +253,18 @@ pub fn run() {
     let builder = tauri::Builder::default();
     // Closing to the tray leaves the process running without a taskbar entry,
     // so a second launch must reopen it instead of starting another instance.
+    // An `onmicode://` link also arrives as a second launch; the deep-link
+    // plugin hands it over before this callback runs.
     // Registered first so the duplicate exits before any setup runs.
-    #[cfg(target_os = "windows")]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-        let _ = window::show_hidden_or_open_new(app);
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        // The link's own window is already coming forward.
+        if !prompt_links::is_link_launch(&argv) {
+            let _ = window::show_hidden_or_open_new(app);
+        }
     }));
     let app = builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
@@ -277,6 +284,7 @@ pub fn run() {
             control::init(app.handle())?;
             mobile_access::init(app.handle())?;
             reminders::init(app.handle());
+            prompt_links::init(app.handle());
             checkpoint::init(app.handle())?;
             menu::install(app.handle())?;
             #[cfg(target_os = "windows")]
@@ -334,6 +342,8 @@ pub fn run() {
             reminders::reminder_clear,
             reminders::reminder_configure,
             reminders::reminder_take_open,
+            prompt_links::prompt_link_take,
+            prompt_links::prompt_link_remotes,
             reminders::reminder_register_window,
             reminders::reminder_open,
             automations::automations_list,

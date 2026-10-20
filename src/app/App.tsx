@@ -564,6 +564,12 @@ import {
 } from "../features/automations/model/automations";
 import { useQuickComposerLaunches } from "../features/quick-composer/hooks/useQuickComposerLaunches";
 import type { QuickLaunch } from "../features/quick-composer/model/quickComposer";
+import {
+  copySessionPromptLink,
+  sessionForPromptLink,
+  type PromptLinkLaunch,
+} from "../features/prompt-links/model/promptLinkSession";
+import { PromptLinks } from "../features/prompt-links/ui/PromptLinks";
 import { claimInboxAutomationRuns } from "../features/automations/model/automationEvents";
 import {
   SECOND_OPINION_TITLE,
@@ -2673,6 +2679,30 @@ function Workspace({
     window.addEventListener(ADD_NOTE_TO_CHAT_EVENT, onAdd);
     return () => window.removeEventListener(ADD_NOTE_TO_CHAT_EVENT, onAdd);
   }, [onAddNoteToChat]);
+
+  // A reviewed prompt link opens as an unsent draft in a new session.
+  const onOpenPromptLink = useCallback(
+    (launch: PromptLinkLaunch) => {
+      setSearchViewOpen(false);
+      setInboxViewOpen(false);
+      setNotesViewOpen(false);
+      setAutomationsViewOpen(false);
+      const session = sessionForPromptLink(
+        launch,
+        sessionDefaults?.runtimeMode,
+      );
+      const tab = newTab(session.id);
+      setSessions((prev) => [...prev, session]);
+      appendTab(tab, launch.cwd);
+      // The title bar filters tabs by project. Select it before the tab.
+      setProjectCwd(launch.cwd);
+      setRecents(rememberProject(launch.cwd));
+      setSidebarTab("sessions", launch.cwd);
+      setActiveTabId(tab.id);
+      setComposerFocused(true);
+    },
+    [appendTab, sessionDefaults?.runtimeMode, setSidebarTab],
+  );
 
   const onInboxCardDismiss = useCallback((sessionId: string) => {
     setSessions((prev) =>
@@ -10435,6 +10465,8 @@ function Workspace({
       "check-updates": () => void runUpdateFlow(true),
       "show-welcome": openWelcome,
       reload: a.onReload,
+      "copy-prompt-link": () => void copySessionPromptLink(active),
+      "copy-prompt-link-context": () => void copySessionPromptLink(active, true),
     };
     const command = commands[id];
     // The palette closes after this returns; let it unmount before views open.
@@ -11859,6 +11891,11 @@ function Workspace({
             onRetry={sessionReminders.refresh}
             onOpenSettings={() => openSettings("general", "notifications")}
             onHeightChange={setReminderNoticesHeight}
+          />
+          <PromptLinks
+            recents={recents}
+            currentCwd={projectCwd}
+            onOpen={onOpenPromptLink}
           />
           {whatsNewVersion ? (
             <WhatsNewDialog

@@ -47,6 +47,8 @@ const COMMANDS: { id: string; label: string; keybinding?: string; keywords?: str
   { id: "zoom-out", label: "Zoom Out", keybinding: "View: Zoom Out", keywords: "smaller scale" },
   { id: "zoom-reset", label: "Reset Zoom", keybinding: "View: Reset Zoom", keywords: "scale" },
   { id: "new-window", label: "New Window", keybinding: "App: New Window" },
+  { id: "copy-prompt-link", label: "Copy Prompt Link", keywords: "share draft url" },
+  { id: "copy-prompt-link-context", label: "Copy Prompt Link with Project and Model", keywords: "share draft url agent repository" },
   { id: "check-updates", label: "Check for Updates", keywords: "upgrade version" },
   { id: "show-welcome", label: "Show Welcome", keywords: "setup onboarding getting started agents" },
   { id: "reload", label: "Reload Onmicode", keybinding: "View: Reload", keywords: "refresh" },

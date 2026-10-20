@@ -208,6 +208,7 @@ const fixtureInvoke = async (
   )
     return;
   if (command === "quick_composer_take") return null;
+  if (command === "prompt_link_take") return [];
   throw new Error(`Unavailable fixture service: ${command}`);
 };
 Object.assign(window, {
