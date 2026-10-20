@@ -59,6 +59,14 @@ describe("piSubagentName", () => {
     expect(
       piSubagentName({ agent: "code-reviewer", task: "[prompt redacted]" }),
     ).toBe("Code Reviewer");
+    // pi-subagents' status file redacts the description too.
+    expect(
+      piSubagentName({
+        agent: "scout",
+        description: "[prompt redacted]",
+        sessionName: "scout: Reply PONG",
+      }),
+    ).toBe("Reply PONG");
   });
 });
 

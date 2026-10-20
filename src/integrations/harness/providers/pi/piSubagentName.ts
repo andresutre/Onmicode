@@ -14,7 +14,7 @@ export function piSubagentName(input: {
   sessionName?: string;
   agent?: string;
 }): string | undefined {
-  const description = input.description?.trim();
+  const description = readableTask(input.description);
   if (description) return description;
   const task = readableTask(input.task);
   const fromTask = task ? taskHeadline(task) : undefined;
