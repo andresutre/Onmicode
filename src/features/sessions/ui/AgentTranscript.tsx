@@ -3217,7 +3217,8 @@ function SubagentPanel({
       <div
         aria-label={`Subagent: ${name}`}
         title={brief}
-        className="-mx-1.5 flex min-w-0 items-center gap-2 px-1.5 py-1"
+        data-subagent-row={block.id}
+        className="-mx-1.5 flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1"
       >
         <SubagentMascot name={name} state={state} active={active} />
         {label}
@@ -3230,6 +3231,7 @@ function SubagentPanel({
     <div className="flex min-w-0 flex-col">
       <button
         type="button"
+        data-subagent-row={block.id}
         aria-expanded={open}
         aria-label={open ? `Hide ${name}'s work` : `Show ${name}'s work`}
         title={brief}
