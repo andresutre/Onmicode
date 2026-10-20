@@ -467,6 +467,10 @@ import {
   fetchCodexRateLimits,
 } from "../features/providers/model/rateLimitsFetch";
 import { exhaustedWindowResetAt } from "../features/providers/model/rateLimits";
+import {
+  otherUsageProvidersFor,
+  usageProvidersFor,
+} from "../features/providers/model/usageProviders";
 import { dropContextWindow } from "../features/sessions/model/contextUsage";
 import {
   discardDraftSessionRecord,
@@ -1833,17 +1837,14 @@ function Workspace({
   }, [activeHarness]);
 
   const usageSource = active;
-  const usageProviders = useMemo(() => {
-    if (
-      usageSource?.harness === "claude" ||
-      usageSource?.harness === "codex" ||
-      usageSource?.harness === "opencode" ||
-      usageSource?.harness === "devin"
-    ) {
-      return [usageSource.harness];
-    }
-    return [];
-  }, [usageSource?.harness]);
+  const usageProviders = useMemo(
+    () => usageProvidersFor(usageSource?.harness),
+    [usageSource?.harness],
+  );
+  const otherUsageProviders = useMemo(
+    () => otherUsageProvidersFor(usageSource?.harness),
+    [usageSource?.harness],
+  );
   const usageSession = useMemo(() => {
     if (!usageSource) return undefined;
     return {
@@ -11294,6 +11295,7 @@ function Workspace({
       <UsageFooter
         pressureSlot={setPressureChipHost}
         providers={usageProviders}
+        otherProviders={otherUsageProviders}
         session={usageSession}
         project={usageSource?.cwd ?? projectCwd}
         onSelectAccount={onSelectProviderAccount}

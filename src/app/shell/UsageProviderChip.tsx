@@ -100,6 +100,7 @@ export function UsageProviderChip({
   onReconnect,
   presentation,
   variant = "footer",
+  compact = false,
 }: {
   limits: ProviderRateLimits;
   now: number;
@@ -114,6 +115,11 @@ export function UsageProviderChip({
   onReconnect?: () => Promise<void>;
   /** `composer` matches the composer's quiet tool buttons. */
   variant?: UsageChipVariant;
+  /**
+   * Only the window closest to its limit, for a provider beside the
+   * session's own. The popover still has every window.
+   */
+  compact?: boolean;
 }) {
   const showRemaining = useShowRemainingUsage();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -140,12 +146,15 @@ export function UsageProviderChip({
     windows.length === 0 &&
     (needsProviderLogin(limits) || reconnectState !== "idle"),
   );
-  const tightest = windows.reduce<RateLimitWindow | null>((best, entry) => {
-    if (!best || entry.window.usedPercent > best.usedPercent) {
-      return entry.window;
-    }
-    return best;
-  }, null);
+  const tightestEntry = windows.reduce<UsageWindowEntry | null>(
+    (best, entry) =>
+      !best || entry.window.usedPercent > best.window.usedPercent
+        ? entry
+        : best,
+    null,
+  );
+  const tightest = tightestEntry?.window ?? null;
+  const chipWindows = compact && tightestEntry ? [tightestEntry] : windows;
   const tooltip = windows
     .map((entry) => rateLimitWindowTooltip(entry.window, now, showRemaining))
     .join(" · ");
@@ -274,14 +283,14 @@ export function UsageProviderChip({
           <span className="text-content/35">{emptyUsageLabel(limits)}</span>
         ) : (
           <>
-            {accounts.length > 1 && activeAccount ? (
+            {!compact && accounts.length > 1 && activeAccount ? (
               <span className="max-w-24 truncate text-content/45">
                 {activeAccount.label}
               </span>
             ) : null}
             {tightest ? <MiniBar usedPct={tightest.usedPercent} /> : null}
             <span className="flex min-w-0 items-center gap-1 tabular-nums">
-              {windows.map((entry, index) => (
+              {chipWindows.map((entry, index) => (
                 <span
                   key={entry.key}
                   className="inline-flex items-center gap-1"
