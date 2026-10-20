@@ -6,6 +6,7 @@ import {
   activityStillRunning,
   buildActivityPhases,
   editVerb,
+  endedOnFailure,
   firstFoldableIndex,
   foldableWork,
   foldedBlocks,
@@ -673,7 +674,38 @@ sed -n '330,430p' src/lib/harness/codexProtocol.test.ts"`,
         ),
         storedCodexTool("run", "/bin/zsh -lc 'npm test'"),
       ]),
-    ).toBe("Read 2 files · Ran a command");
+    ).toBe("Read 2 files · Ran tests");
+  });
+
+  it("names a lone command for what it ran, the way a lone file is named", () => {
+    const command = (
+      id: string,
+      text: string,
+      status = "completed",
+    ): Block => ({
+      id,
+      role: "tool",
+      text,
+      tool: { kind: "execute", title: text, status },
+    });
+    expect(title([command("c1", "cd app && git status --short")])).toBe(
+      "Ran git",
+    );
+    expect(title([read("r1", "a.ts"), command("c1", "npx vitest run")])).toBe(
+      "Read a.ts · Ran tests",
+    );
+    expect(
+      title(
+        [read("r1", "a.ts"), command("c1", "cargo test", "in_progress")],
+        true,
+      ),
+    ).toBe("Read a.ts · Running tests");
+    // Two commands are counted, whatever they ran.
+    expect(title([command("c1", "npm test"), command("c2", "git diff")])).toBe(
+      "Ran 2 commands",
+    );
+    // A harness's description of the call is not a program to name.
+    expect(title([command("c1", "Run the linter")])).toBe("Ran a command");
   });
 
   it("puts only the call in flight in the present tense", () => {
@@ -1579,5 +1611,28 @@ describe("subagent model labels", () => {
     expect(subagentModelName(row("custom-model-v2"))).toBe("custom-model-v2");
     for (const model of [undefined, "", "auto", "inherit", "default"])
       expect(subagentModelName(row(model))).toBeUndefined();
+  });
+});
+
+describe("endedOnFailure", () => {
+  it("marks a group whose last call failed, not one that recovered", () => {
+    expect(endedOnFailure([shell("a"), shell("b", "failed")])).toBe(true);
+    expect(endedOnFailure([shell("a", "failed"), shell("b")])).toBe(false);
+    // Narration after the call does not hide where the work stopped.
+    expect(
+      endedOnFailure([shell("a", "failed"), thought("t1"), note("n1", "Hm.")]),
+    ).toBe(true);
+    expect(endedOnFailure([thought("t1")])).toBe(false);
+  });
+
+  it("counts a denied call, but not one still waiting on the user", () => {
+    expect(
+      endedOnFailure([
+        shell("a", "pending", { requestId: 1, decided: "deny" }),
+      ]),
+    ).toBe(true);
+    expect(endedOnFailure([shell("a", "failed", { requestId: 1 })])).toBe(
+      false,
+    );
   });
 });

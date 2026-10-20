@@ -1558,3 +1558,70 @@ describe("subagent steps", () => {
     expect(session.blocks[0].agentRun?.steps).toHaveLength(1);
   });
 });
+
+describe("tool output", () => {
+  const started = () =>
+    applyHarnessEvent(newSession("codex", "/repo"), {
+      type: "tool.started",
+      callId: "cmd",
+      title: "npm test",
+      kind: "execute",
+      status: "in_progress",
+    });
+
+  it("joins streamed chunks as they arrive, mid-line breaks included", () => {
+    let session = started();
+    for (const chunk of ["RUN v3\n", " ✓ a.test", ".ts\n"]) {
+      session = applyHarnessEvent(session, {
+        type: "tool.updated",
+        callId: "cmd",
+        kind: "execute",
+        status: "in_progress",
+        outputDelta: chunk,
+      });
+    }
+    expect(session.blocks[0].tool?.detail).toBe("RUN v3\n ✓ a.test.ts\n");
+    session = applyHarnessEvent(session, {
+      type: "tool.updated",
+      callId: "cmd",
+      kind: "execute",
+      status: "completed",
+      detail: "RUN v3\n ✓ a.test.ts\n\n 1 passed\n",
+    });
+    expect(session.blocks[0].tool?.detail).toBe(
+      "RUN v3\n ✓ a.test.ts\n\n 1 passed",
+    );
+  });
+
+  it("keeps the newest lines of long live output, and the start of a result", () => {
+    const long = `${"a".repeat(5_000)}${"b".repeat(5_000)}`;
+    let session = applyHarnessEvent(started(), {
+      type: "tool.updated",
+      callId: "cmd",
+      status: "in_progress",
+      outputDelta: long,
+    });
+    let detail = session.blocks[0].tool?.detail ?? "";
+    expect(detail.startsWith("…\n")).toBe(true);
+    expect(detail.endsWith("b".repeat(5_000))).toBe(true);
+
+    session = applyHarnessEvent(started(), {
+      type: "tool.updated",
+      callId: "cmd",
+      status: "running",
+      detail: long,
+    });
+    detail = session.blocks[0].tool?.detail ?? "";
+    expect(detail.endsWith("b".repeat(5_000))).toBe(true);
+
+    session = applyHarnessEvent(session, {
+      type: "tool.updated",
+      callId: "cmd",
+      status: "completed",
+      detail: long,
+    });
+    detail = session.blocks[0].tool?.detail ?? "";
+    expect(detail.startsWith("a".repeat(5_000))).toBe(true);
+    expect(detail.endsWith("\n…")).toBe(true);
+  });
+});

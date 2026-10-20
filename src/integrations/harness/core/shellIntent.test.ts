@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  commandSubject,
   formatShellIntent,
   inferShellIntent,
   unwrapShellCommand,
@@ -238,5 +239,72 @@ describe("unwrapShellCommand", () => {
     expect(unwrapShellCommand(`pwsh -Command 'npm test`)).toBe(
       `pwsh -Command 'npm test`,
     );
+  });
+});
+
+describe("commandSubject", () => {
+  it("names the program that does the work", () => {
+    expect(commandSubject("git status --short")).toBe("git");
+    expect(commandSubject("npm run build")).toBe("npm");
+    expect(commandSubject("node scripts/build.mjs --watch")).toBe("node");
+    expect(commandSubject("Get-ChildItem -Recurse src")).toBe("Get-ChildItem");
+    expect(commandSubject("C:/tools/MSBuild.exe app.sln")).toBe("MSBuild");
+  });
+
+  it("looks past setup, assignments and launchers", () => {
+    expect(commandSubject("cd app && git log -5")).toBe("git");
+    expect(commandSubject('echo "---" ; cargo clippy')).toBe("cargo");
+    expect(commandSubject("CI=1 FORCE_COLOR=0 node build.mjs")).toBe("node");
+    expect(commandSubject("env -u HOME NODE_ENV=test node a.js")).toBe("node");
+    expect(commandSubject("sudo -u root apt-get update")).toBe("apt-get");
+    expect(commandSubject("timeout 60 python serve.py")).toBe("python");
+    expect(commandSubject("npx -y tsc --noEmit")).toBe("tsc");
+    expect(commandSubject("npx create-vite@latest app")).toBe("create-vite");
+    expect(commandSubject("pnpm exec eslint .")).toBe("eslint");
+    expect(commandSubject('$env:CI = "1"; Set-Location app; npm ci')).toBe(
+      "npm",
+    );
+    expect(commandSubject("git diff | head -40")).toBe("git");
+  });
+
+  it("calls a test run tests", () => {
+    for (const command of [
+      "npm test",
+      "npm t",
+      "npm run test:unit -- --run",
+      "pnpm -r test",
+      "yarn test",
+      "bun test",
+      "npx vitest run src/app",
+      "cd web && npx jest --watch=false",
+      "pytest -x tests/",
+      "python3 -m pytest -q",
+      "uv run pytest",
+      "cargo test --workspace",
+      "cargo nextest run",
+      "go test ./...",
+      "dotnet test",
+      "./gradlew test",
+      "make test",
+    ]) {
+      expect(commandSubject(command), command).toBe("tests");
+    }
+    expect(commandSubject("npm run build")).toBe("npm");
+    expect(commandSubject("cargo build --release")).toBe("cargo");
+    expect(commandSubject("pnpm --filter web test")).toBe("pnpm");
+  });
+
+  it("reads through the shell launcher a harness wrapped the command in", () => {
+    expect(commandSubject(`/bin/zsh -lc 'npm test'`)).toBe("tests");
+    expect(commandSubject(`pwsh.exe -Command "git status"`)).toBe("git");
+  });
+
+  it("gives up rather than guess", () => {
+    expect(commandSubject("Run the test suite")).toBeUndefined();
+    expect(commandSubject("Terminal")).toBeUndefined();
+    expect(commandSubject("bash script.sh")).toBeUndefined();
+    expect(commandSubject("$(npm bin)/vitest")).toBeUndefined();
+    expect(commandSubject("cd src")).toBeUndefined();
+    expect(commandSubject("")).toBeUndefined();
   });
 });

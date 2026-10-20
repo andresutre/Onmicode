@@ -126,6 +126,23 @@ describe("tool failure details", () => {
   });
 });
 
+describe("running tool details", () => {
+  it("reports what a running shell has printed so far, else its title", () => {
+    const running = (metadata?: Record<string, unknown>) =>
+      detailFromToolPart({
+        id: "bash-1",
+        type: "tool",
+        tool: "bash",
+        state: { status: "running", title: "Runs the tests", metadata },
+      });
+    expect(running({ output: "RUN v3\n ✓ a.test.ts\n" })).toBe(
+      "RUN v3\n ✓ a.test.ts\n",
+    );
+    expect(running({ description: "Runs the tests" })).toBe("Runs the tests");
+    expect(running()).toBe("Runs the tests");
+  });
+});
+
 describe("parseServerUrlFromOutput", () => {
   it("reads the listening URL from server output", () => {
     expect(

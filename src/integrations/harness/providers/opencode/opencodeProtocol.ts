@@ -467,8 +467,12 @@ export function detailFromToolPart(part: OpenCodePart): string | undefined {
       stringField(asRecord(error?.error), "message")
     );
   }
-  if (status === "running" && typeof state.title === "string") return state.title;
-  return undefined;
+  if (status !== "running") return undefined;
+  // A running shell reports everything it has printed so far in its metadata.
+  return (
+    stringField(asRecord(state.metadata), "output") ??
+    (typeof state.title === "string" ? state.title : undefined)
+  );
 }
 
 export function permissionTitle(permission: string, patterns: string[]): string {

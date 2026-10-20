@@ -88,6 +88,7 @@ export function applyHarnessEvent(
         kind: event.kind,
         status: event.status,
         detail: event.detail,
+        outputDelta: event.outputDelta,
         preview: event.preview,
         paths: event.paths,
         streaming: event.status !== "completed" && event.status !== "failed",
@@ -934,6 +935,7 @@ function upsertTool(
     kind?: string;
     status?: string;
     detail?: string;
+    outputDelta?: string;
     preview?: ToolPreview;
     paths?: string[];
     streaming: boolean;
@@ -943,7 +945,9 @@ function upsertTool(
 ): Session {
   const index = findToolIndex(session, patch);
   if (index < 0) {
-    const detail = capToolDetail(patch.detail);
+    const detail = patch.outputDelta
+      ? appendToolOutput(undefined, patch.outputDelta)
+      : capToolDetail(patch.detail, isRunningStatus(patch.status));
     const preview = fillPreview(patch.preview, detail, patch.kind, patch.title);
     const label = finalToolLabel(
       session,
@@ -972,7 +976,10 @@ function upsertTool(
     });
   }
   const prev = session.blocks[index];
-  const detail = capToolDetail(patch.detail) ?? prev.tool?.detail;
+  const detail = patch.outputDelta
+    ? appendToolOutput(prev.tool?.detail, patch.outputDelta)
+    : (capToolDetail(patch.detail, isRunningStatus(patch.status)) ??
+      prev.tool?.detail);
   const preview = fillPreview(
     mergeToolPreview(patch.preview, prev.tool?.preview),
     detail,
@@ -1035,11 +1042,33 @@ function upsertTool(
 
 const MAX_TOOL_DETAIL_CHARS = 8_000;
 
-function capToolDetail(value: string | undefined): string | undefined {
+/**
+ * A result keeps its start. Output still being printed keeps its end instead:
+ * that is where the newest lines are, and the finished result replaces it.
+ */
+function capToolDetail(
+  value: string | undefined,
+  live = false,
+): string | undefined {
   const text = value?.trim();
   if (!text) return undefined;
   if (text.length <= MAX_TOOL_DETAIL_CHARS) return text;
+  if (live) return `…\n${text.slice(text.length - MAX_TOOL_DETAIL_CHARS)}`;
   return `${text.slice(0, MAX_TOOL_DETAIL_CHARS)}\n…`;
+}
+
+function isRunningStatus(status: string | undefined): boolean {
+  return status === "in_progress" || status === "running";
+}
+
+/**
+ * Output streamed in pieces, kept as it arrives: a chunk can end mid-line, so
+ * nothing is trimmed, and a long run keeps its newest lines.
+ */
+function appendToolOutput(previous: string | undefined, delta: string): string {
+  const text = `${previous ?? ""}${delta}`;
+  if (text.length <= MAX_TOOL_DETAIL_CHARS) return text;
+  return `…\n${text.slice(text.length - MAX_TOOL_DETAIL_CHARS)}`;
 }
 
 function samePreview(a?: ToolPreview, b?: ToolPreview): boolean {

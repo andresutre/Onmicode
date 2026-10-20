@@ -52,6 +52,7 @@ import { useReplyReflowAnchor } from "./useReplyReflowAnchor";
 import { FilePreview } from "../../files/ui/FilePreview";
 import { FileTypeIcon } from "../../files/ui/FileTypeIcon";
 import { ToolDiffPreview } from "./ToolDiffPreview";
+import { ToolOutputPanel } from "./ToolOutputPanel";
 import { PlanPreview } from "./PlanPreview";
 import { TaskListPreview } from "./TaskListPreview";
 import { HandoffButton, SecondOpinionButton } from "./SecondOpinionButton";
@@ -111,6 +112,7 @@ import {
   activityPhaseTitle,
   activityStillRunning,
   buildActivityPhases,
+  endedOnFailure,
   firstFoldableIndex,
   foldableWork,
   foldedBlocks,
@@ -140,6 +142,7 @@ import {
   type ToolCallState,
   type TurnItem,
 } from "../model/transcriptActivity";
+import { toolOutputDisclosure } from "../model/toolOutput";
 import { lastUserTurnBlock } from "../model/editLastTurn";
 import {
   monoCodeToolCall,
@@ -2811,6 +2814,8 @@ function ActivityPhaseGroup({
   }, [phase.steps]);
   const turnFor = useStepQueue();
   const title = activityPhaseTitle(phase, active);
+  // Open, the failed row marks itself. Folded, the header has to.
+  const stoppedOnFailure = !open && endedOnFailure(phase.steps);
   const monoCodePhase = !!monoCodeWorkSummary(phase.steps, active);
   // Opening a group on purpose is also how you read the line that titled it,
   // whole. The auto-open while it runs is a live view, not a reading one, and
@@ -2871,7 +2876,9 @@ function ActivityPhaseGroup({
         type="button"
         aria-expanded={open}
         aria-label={
-          open ? `Hide the steps for ${title}` : `Show the steps for ${title}`
+          open
+            ? `Hide the steps for ${title}`
+            : `Show the steps for ${title}${stoppedOnFailure ? ", which ended on a failed call" : ""}`
         }
         onClick={() => setOverride(!open)}
         className="group flex w-full min-w-0 items-center gap-1.5 py-1 text-left"
@@ -2897,6 +2904,7 @@ function ActivityPhaseGroup({
           />
         </span>
         {label}
+        {stoppedOnFailure ? <ToolCallStatusIcon state="rejected" /> : null}
       </button>
       <div className="zen-phase-body" data-open={open}>
         {open ? (
@@ -3690,8 +3698,8 @@ function ActivityToolRow({
   onOpenFile?: (path: string) => void;
   onOpenDiff?: (path: string) => void;
 }) {
-  const [errorOpen, setErrorOpen] = useState(false);
-  const output = useToolDetail(block, errorOpen);
+  const [open, setOpen] = useState(false);
+  const output = useToolDetail(block, open);
   const appCall = monoCodeToolCall(block);
   if (appCall) {
     return (
@@ -3701,12 +3709,9 @@ function ActivityToolRow({
   const label = toolCallLabel(block, cwd);
   const state = toolCallState(block);
   const pending = needsApproval(block);
-  const errorDetail =
-    !pending && state === "rejected"
-      ? output.omitted
-        ? (output.detail?.trim() ?? LOADING_OUTPUT)
-        : output.detail?.trim()
-      : undefined;
+  const disclosure = toolOutputDisclosure(block, label, output);
+  const failed = disclosure === "error";
+  const toggle = () => setOpen((value) => !value);
   const summary = (
     <ToolCallSummary
       label={label}
@@ -3722,28 +3727,35 @@ function ActivityToolRow({
 
   return (
     <div className="flex min-w-0 flex-col">
-      {errorDetail ? (
+      {disclosure ? (
+        // A failure keeps its chevron in view. Output is there for whoever
+        // wants it, so its chevron waits for the pointer like the fold's.
         <div
-          aria-label={`Failed tool call: ${label}`}
+          aria-label={`${failed ? "Failed tool call" : "Tool call"}: ${label}`}
           className="group flex min-w-0 items-center gap-1.5 py-1"
         >
           {bare ? null : <ActivityToolIcon state={state} live={live} />}
-          <div
-            className="flex min-w-0 flex-1 cursor-pointer"
-            onClick={() => setErrorOpen((value) => !value)}
-          >
+          <div className="flex min-w-0 flex-1 cursor-pointer" onClick={toggle}>
             {summary}
           </div>
           <ToolCallStatusIcon state={state} />
           <button
             type="button"
-            aria-expanded={errorOpen}
-            aria-label={`${errorOpen ? "Hide" : "Show"} error details for ${label}`}
-            onClick={() => setErrorOpen((value) => !value)}
+            aria-expanded={open}
+            aria-label={`${open ? "Hide" : "Show"} ${failed ? "error details" : "output"} for ${label}`}
+            onClick={toggle}
             className="-m-1 shrink-0 rounded p-1"
           >
             <ChevronRight
-              className={`size-3.5 text-red-400/60 transition-transform ${errorOpen ? "rotate-90" : ""}`}
+              className={`size-3.5 transition-[transform,opacity] ${
+                failed ? "text-red-400/60" : "text-content/45"
+              } ${
+                open
+                  ? "rotate-90"
+                  : failed
+                    ? ""
+                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+              }`}
               strokeWidth={1.75}
             />
           </button>
@@ -3761,12 +3773,13 @@ function ActivityToolRow({
       {pending ? (
         <ApprovalControls block={block} onApproval={onApproval} />
       ) : null}
-      {errorOpen && errorDetail ? (
-        <pre
-          className={`min-w-0 whitespace-pre-wrap break-words py-1 font-mono text-[12px] leading-5 text-red-400/80 ${bare ? "" : "pl-5"}`}
-        >
-          {errorDetail}
-        </pre>
+      {open && disclosure ? (
+        <ToolOutputPanel
+          text={output.detail?.trim() || (output.omitted ? LOADING_OUTPUT : "")}
+          live={!failed && state === "pending"}
+          failed={failed}
+          className={bare ? "" : "pl-5"}
+        />
       ) : null}
     </div>
   );

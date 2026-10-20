@@ -72,6 +72,12 @@ export type HarnessEvent =
       kind?: string;
       status?: string;
       detail?: string;
+      /**
+       * What the call printed since the last update, for harnesses that
+       * stream output in pieces. It joins the output so far; `detail`
+       * replaces it.
+       */
+      outputDelta?: string;
       preview?: ToolPreview;
       /** Every path affected when one structured edit changes multiple files. */
       paths?: string[];
