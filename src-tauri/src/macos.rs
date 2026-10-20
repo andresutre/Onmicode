@@ -216,7 +216,6 @@ fn set_launch_background(window: &WebviewWindow, r: u8, g: u8, b: u8) {
     set_glass_backing(&ns_window, false);
     ns_window.setOpaque(true);
     set_native_background(
-        window,
         &ns_window,
         &NSColor::colorWithRed_green_blue_alpha(
             r as f64 / 255.0,
@@ -227,7 +226,7 @@ fn set_launch_background(window: &WebviewWindow, r: u8, g: u8, b: u8) {
     );
 }
 
-fn set_native_background(window: &WebviewWindow, native: &NSWindow, color: &NSColor) {
+fn set_native_background(native: &NSWindow, color: &NSColor) {
     if let Some(tint) = native.contentView().and_then(|content| {
         content.subviews().iter().find(|view| {
             view.identifier().as_deref() == Some(&NSString::from_str(GLASS_TINT_ID))
@@ -295,7 +294,7 @@ fn prepare_glass(
         // a jagged gap at the corners, so keep the original tiny alpha.
         NSColor::clearColor().colorWithAlphaComponent(0.01)
     };
-    set_native_background(window, &ns_window, &color);
+    set_native_background(&ns_window, &color);
     opacity.is_some()
 }
 
