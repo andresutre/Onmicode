@@ -71,6 +71,24 @@ impl SessionStore {
             .lock()
             .map_err(|_| "Session store is locked".into())
     }
+
+    /// Runs a long read on the query-only connection, so it never holds up
+    /// saves. In-memory test stores have none and use the main connection.
+    pub(crate) fn with_read_conn<T>(
+        &self,
+        read: impl FnOnce(&Connection) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let read_conn = self
+            .read_conn
+            .lock()
+            .map_err(|_| "Session read store is locked")?;
+        if let Some(conn) = read_conn.as_ref() {
+            return read(conn);
+        }
+        drop(read_conn);
+        let conn = self.lock_conn()?;
+        read(&conn)
+    }
 }
 
 pub fn init(app: &AppHandle) -> Result<(), String> {
