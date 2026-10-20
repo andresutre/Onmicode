@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CUSTOM_OPTION_ID,
+  answeredQuestions,
+  answeredQuestionsText,
   buildQuestionReply,
   questionAnswersComplete,
   questionIsComplete,
@@ -197,5 +199,72 @@ describe("buildQuestionReply", () => {
       },
       custom: { [language.id]: "Python" },
     });
+  });
+});
+
+describe("answer attachments", () => {
+  const [open, closed] = questionsFromUnknown({
+    questions: [
+      { question: "What should change?", options: [{ label: "Layout" }] },
+      { id: "q", prompt: "Proceed?", options: [{ id: "y", label: "Yes" }] },
+    ],
+  });
+  const shot = {
+    id: "shot",
+    name: "shot.png",
+    mimeType: "image/png",
+    kind: "image" as const,
+    size: 4,
+    path: "/tmp/shot.png",
+  };
+
+  it("lets files answer a question that takes its own answer", () => {
+    expect(open!.allowCustom).toBe(true);
+    expect(questionIsComplete(open!, {}, {}, { [open!.id]: [shot] })).toBe(
+      true,
+    );
+    expect(
+      questionIsComplete(
+        open!,
+        { [open!.id]: [CUSTOM_OPTION_ID] },
+        {},
+        { [open!.id]: [shot] },
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps files off a question limited to its options", () => {
+    expect(closed!.allowCustom).toBe(false);
+    expect(questionIsComplete(closed!, {}, {}, { q: [shot] })).toBe(false);
+    expect(
+      buildQuestionReply([closed!], { q: ["y"] }, {}, { q: [shot] }),
+    ).toEqual({ kind: "answered", answers: { q: ["y"] } });
+  });
+
+  it("sends files with the answer and records them for the transcript", () => {
+    const reply = buildQuestionReply(
+      [open!, closed!],
+      { [open!.id]: ["Layout"] },
+      {},
+      { [open!.id]: [shot] },
+    );
+    expect(reply).toEqual({
+      kind: "answered",
+      answers: { [open!.id]: ["Layout"] },
+      attachments: { [open!.id]: [shot] },
+    });
+    const answered = answeredQuestions([open!, closed!], reply);
+    expect(answered).toEqual([
+      {
+        id: open!.id,
+        prompt: "What should change?",
+        answers: ["Layout"],
+        attachments: [shot],
+      },
+    ]);
+    expect(answeredQuestionsText(answered)).toBe(
+      "What should change?\nLayout\nAttached: shot.png",
+    );
+    expect(answeredQuestions([open!], { kind: "skipped" })).toEqual([]);
   });
 });

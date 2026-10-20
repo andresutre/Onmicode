@@ -6,6 +6,7 @@ import { acpAgentInfo } from "../../core/acpSubagents";
 import type { ApprovalDecision, HarnessEvent } from "../../core/types";
 import type { UserQuestion, UserQuestionReply } from "../../../../features/sessions/model/userQuestion";
 import { questionsFromUnknown, selectedAnswerLabels } from "../../../../features/sessions/model/userQuestion";
+import { answerParts, answerText } from "../../../../features/sessions/model/questionAnswers";
 import {
   composeToolTitle,
   extractSearchQuery,
@@ -69,11 +70,18 @@ export function askQuestionResponse(
   if (reply.kind !== "answered") return { outcome: "skip_interview" };
   const answers: Record<string, string | string[]> = {};
   for (const question of questions) {
-    const labels = selectedAnswerLabels(question, reply);
-    if (labels.length === 0) continue;
-    answers[question.prompt] = question.multiSelect
-      ? labels
-      : (labels[0] ?? "");
+    // Answers are text, so attached files go as paths Grok's tools can read.
+    if (question.multiSelect) {
+      const parts = answerParts(question, reply);
+      if (parts.length) answers[question.prompt] = parts;
+      continue;
+    }
+    const answer = answerText(
+      question,
+      reply,
+      selectedAnswerLabels(question, reply)[0] ?? "",
+    );
+    if (answer) answers[question.prompt] = answer;
   }
   return { outcome: "accepted", answers };
 }

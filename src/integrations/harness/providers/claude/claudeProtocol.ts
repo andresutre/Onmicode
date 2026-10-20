@@ -21,6 +21,7 @@ import {
   selectedAnswerLabels,
   type UserQuestionReply,
 } from "../../../../features/sessions/model/userQuestion";
+import { answerText } from "../../../../features/sessions/model/questionAnswers";
 import {
   extractToolPreview,
   isAgentToolName,
@@ -927,10 +928,13 @@ export function askUserQuestionAllowInput(
   if (reply?.kind === "answered") {
     for (const question of questions) {
       const labels = selectedAnswerLabels(question, reply);
-      if (labels.length === 0) continue;
-      answers[question.prompt] = question.multiSelect
-        ? labels.join(", ")
-        : (labels[0] ?? "");
+      // The tool result is text, so attached files go as paths Claude can Read.
+      const answer = answerText(
+        question,
+        reply,
+        question.multiSelect ? labels.join(", ") : (labels[0] ?? ""),
+      );
+      if (answer) answers[question.prompt] = answer;
     }
   }
   return { questions: input.questions, answers };

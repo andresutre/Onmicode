@@ -2,17 +2,57 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DragDropEvent } from "@tauri-apps/api/webview";
 import { QuestionForm } from "./QuestionForm";
 import type {
   UserQuestionPrompt,
   UserQuestionReply,
 } from "../model/userQuestion";
 
+const { invoke, listen, pickFiles } = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  listen: vi.fn(),
+  pickFiles: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ onDragDropEvent: listen }),
+}));
+vi.mock("../../../platform/tauri/fs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../platform/tauri/fs")>()),
+  pickFiles,
+}));
+
 let container: HTMLDivElement;
 let root: Root;
+let dropHandlers: Set<(event: { payload: DragDropEvent }) => void>;
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  dropHandlers = new Set();
+  listen.mockReset();
+  listen.mockImplementation(async (handler) => {
+    dropHandlers.add(handler);
+    return () => dropHandlers.delete(handler);
+  });
+  pickFiles.mockReset();
+  invoke.mockReset();
+  invoke.mockImplementation(
+    async (command: string, args?: { paths?: string[]; name?: string }) => {
+      if (command === "inspect_paths")
+        return (args?.paths ?? []).map((path) => ({
+          path,
+          name: path.split("/").pop() ?? path,
+          size: 4,
+          isDir: false,
+        }));
+      if (command === "read_file_base64") return "aW1n";
+      if (command === "write_attachment") return `/tmp/answers/${args?.name}`;
+      if (command === "clipboard_file_paths") return [];
+      return [];
+    },
+  );
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -198,5 +238,185 @@ describe("QuestionForm steps", () => {
       kind: "answered",
       answers: { colour: ["green"], size: ["large"] },
     });
+  });
+});
+
+describe("QuestionForm attachments", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+  function openQuestion(): UserQuestionPrompt {
+    return {
+      requestId: 11,
+      questions: [
+        {
+          id: "change",
+          prompt: "What should change?",
+          multiSelect: false,
+          allowCustom: true,
+          options: [{ id: "layout", label: "Layout" }],
+        },
+      ],
+    };
+  }
+
+  function renderForm(
+    question: UserQuestionPrompt,
+    attachments: boolean,
+    onReply: (requestId: number, reply: UserQuestionReply) => void = vi.fn(),
+  ) {
+    act(() =>
+      root.render(
+        createElement(QuestionForm, { prompt: question, onReply, attachments }),
+      ),
+    );
+  }
+
+  function attachButton() {
+    return container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Attach files to your answer"]',
+    );
+  }
+
+  function chipNames() {
+    return Array.from(
+      container.querySelectorAll('[aria-label^="Remove "]'),
+      (button) => button.getAttribute("aria-label")!.slice("Remove ".length),
+    );
+  }
+
+  function continueButton() {
+    return container.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  }
+
+  /** Reads cross IPC hops and a FileReader, so they need real macrotasks. */
+  async function settleUntil(check: () => boolean, what: string) {
+    for (let waited = 0; waited < 2000; waited += 10) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      if (check()) return;
+    }
+    throw new Error(`Timed out waiting for ${what}.`);
+  }
+
+  it("offers files only when the harness and the question can take them", () => {
+    renderForm(prompt(), true);
+    expect(attachButton()).toBeNull();
+    renderForm(openQuestion(), false);
+    expect(attachButton()).toBeNull();
+    renderForm(openQuestion(), true);
+    expect(attachButton()).not.toBeNull();
+    expect(
+      container.querySelector("form")!.hasAttribute("data-file-drop-zone"),
+    ).toBe(true);
+  });
+
+  it("answers with picked files alone and keeps focus on Attach after a removal", async () => {
+    const onReply = vi.fn();
+    pickFiles.mockResolvedValue(["/repo/spec.pdf", "/repo/mock.png"]);
+    renderForm(openQuestion(), true, onReply);
+    expect(continueButton().disabled).toBe(true);
+
+    act(() => attachButton()!.click());
+    await settleUntil(() => chipNames().length === 2, "two chips");
+    expect(continueButton().disabled).toBe(false);
+
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>('[aria-label="Remove spec.pdf"]')!
+        .click(),
+    );
+    expect(chipNames()).toEqual(["mock.png"]);
+    expect(document.activeElement).toBe(attachButton());
+
+    act(() => continueButton().click());
+    expect(onReply).toHaveBeenCalledWith(11, {
+      kind: "answered",
+      answers: {},
+      attachments: {
+        change: [
+          expect.objectContaining({
+            name: "mock.png",
+            path: "/repo/mock.png",
+            data: "aW1n",
+          }),
+        ],
+      },
+    });
+  });
+
+  it("saves a pasted image to disk so the answer can name its path", async () => {
+    const onReply = vi.fn();
+    renderForm(openQuestion(), true, onReply);
+    const option = container.querySelector<HTMLButtonElement>(
+      "button[aria-pressed]",
+    )!;
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        getData: () => "",
+        files: [new File([PNG], "image.png", { type: "image/png" })],
+        items: [],
+      },
+    });
+    act(() => {
+      option.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(true);
+    await settleUntil(() => chipNames().length === 1, "the pasted image");
+
+    expect(invoke).toHaveBeenCalledWith("write_attachment", {
+      name: "image.png",
+      data: expect.any(String),
+    });
+    act(() => option.click());
+    act(() => continueButton().click());
+    expect(onReply).toHaveBeenCalledWith(11, {
+      kind: "answered",
+      answers: { change: ["layout"] },
+      attachments: {
+        change: [
+          expect.objectContaining({
+            name: "image.png",
+            kind: "image",
+            path: "/tmp/answers/image.png",
+          }),
+        ],
+      },
+    });
+  });
+
+  it("attaches files dropped on the question", async () => {
+    renderForm(openQuestion(), true);
+    const form = container.querySelector("form")!;
+    form.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, right: 300, bottom: 120 }) as DOMRect;
+    await act(async () => {
+      for (const handler of dropHandlers)
+        handler({
+          payload: {
+            type: "over",
+            position: { x: 20, y: 20 },
+          } as DragDropEvent,
+        });
+    });
+    expect(container.textContent).toContain(
+      "Drop files to attach to your answer",
+    );
+    await act(async () => {
+      for (const handler of dropHandlers)
+        handler({
+          payload: {
+            type: "drop",
+            paths: ["/repo/notes.md"],
+            position: { x: 20, y: 20 },
+          } as DragDropEvent,
+        });
+    });
+    await settleUntil(() => chipNames().length === 1, "the dropped file");
+    expect(chipNames()).toEqual(["notes.md"]);
+    expect(container.textContent).not.toContain(
+      "Drop files to attach to your answer",
+    );
   });
 });

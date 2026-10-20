@@ -75,10 +75,10 @@ import type {
 import {
   questionPromptTitle,
   questionsFromUnknown,
-  selectedAnswerLabels,
   type UserQuestion,
   type UserQuestionReply,
 } from "../../../../features/sessions/model/userQuestion";
+import { answerParts } from "../../../../features/sessions/model/questionAnswers";
 
 type PendingApproval = {
   id: string;
@@ -1421,15 +1421,15 @@ async function waitQuestion(
     type: "question.resolved",
     requestId: uiId,
     decision: reply.kind,
+    ...(reply.kind === "answered" ? { reply } : {}),
   });
   showNextQuestion(live);
   if (reply.kind !== "answered") {
     await live.client.rejectQuestion(id);
     return;
   }
-  const answers = questions.map((question) =>
-    selectedAnswerLabels(question, reply),
-  );
+  // Answers are strings, so attached files go as paths OpenCode can read.
+  const answers = questions.map((question) => answerParts(question, reply));
   await live.client.replyQuestion(id, answers);
 }
 

@@ -15,9 +15,17 @@ import {
 type FileDropState = { attachmentsSupported: boolean; remote: boolean };
 
 /**
+ * Marks a zone inside the session pane that takes the files dropped on it,
+ * such as a question's answer, in place of the composer.
+ */
+export const FILE_DROP_ZONE_ATTRIBUTE = "data-file-drop-zone";
+const NESTED_ZONE = `[${FILE_DROP_ZONE_ATTRIBUTE}]`;
+
+/**
  * Files dropped anywhere on the session pane around `anchor` attach to its
  * composer: from the OS (native and DOM drops) and from the file explorer.
- * Returns whether a file is being dragged over the pane.
+ * `zone: "self"` narrows that to `anchor` itself, for a nested drop zone.
+ * Returns whether a file is being dragged over the target.
  */
 export function useFileDrop({
   anchor,
@@ -25,6 +33,7 @@ export function useFileDrop({
   state,
   read,
   onError,
+  zone = "pane",
 }: {
   anchor: RefObject<HTMLElement | null>;
   enabled: boolean;
@@ -32,6 +41,7 @@ export function useFileDrop({
   state: RefObject<FileDropState>;
   read: (read: () => Promise<Attachment[]>) => void;
   onError: (message: string) => void;
+  zone?: "pane" | "self";
 }): boolean {
   const [fileDrag, setFileDrag] = useState(false);
   const supported = state.current.attachmentsSupported;
@@ -42,22 +52,44 @@ export function useFileDrop({
       return;
     }
     const dropRoot = () =>
-      anchor.current?.closest("[data-session-drop]") as HTMLElement | null;
+      zone === "self"
+        ? anchor.current
+        : (anchor.current?.closest(
+            "[data-session-drop]",
+          ) as HTMLElement | null);
     let nativeDropAt = 0;
     let cancelled = false;
+
+    // Files dropped on a nested zone belong to that zone, not the pane.
+    const overNestedZone = (root: HTMLElement, x: number, y: number) =>
+      zone === "pane" &&
+      Array.from(root.querySelectorAll<HTMLElement>(NESTED_ZONE)).some(
+        (element) => within(element.getBoundingClientRect(), x, y),
+      );
+    const inNestedZone = (target: EventTarget | null) => {
+      const root = dropRoot();
+      if (zone !== "pane" || !root || !(target instanceof Element))
+        return false;
+      const owner = target.closest(NESTED_ZONE);
+      return !!owner && owner !== root && root.contains(owner);
+    };
 
     const overTarget = (x: number, y: number) => {
       const root = dropRoot();
       if (!root) return false;
-      const rect = root.getBoundingClientRect();
       return (
-        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+        within(root.getBoundingClientRect(), x, y) &&
+        !overNestedZone(root, x, y)
       );
     };
 
     const onDragOver = (event: DragEvent) => {
       const data = event.dataTransfer;
       if (!hasFiles(data)) return;
+      if (inNestedZone(event.target)) {
+        setFileDrag(false);
+        return;
+      }
       event.preventDefault();
       const supported = state.current.attachmentsSupported;
       data.dropEffect = supported ? "copy" : "none";
@@ -73,6 +105,10 @@ export function useFileDrop({
     const onDrop = (event: DragEvent) => {
       const data = event.dataTransfer;
       if (!hasFiles(data)) return;
+      if (inNestedZone(event.target)) {
+        setFileDrag(false);
+        return;
+      }
       event.preventDefault();
       setFileDrag(false);
       if (!state.current.attachmentsSupported) return;
@@ -156,13 +192,17 @@ export function useFileDrop({
       );
       unlisten?.();
     };
-  }, [anchor, enabled, state, read, onError]);
+  }, [anchor, enabled, state, read, onError, zone]);
 
   useEffect(() => {
     if (!supported) setFileDrag(false);
   }, [supported]);
 
   return fileDrag;
+}
+
+function within(rect: DOMRect, x: number, y: number): boolean {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
 function hasFiles(data: DataTransfer | null): data is DataTransfer {

@@ -626,6 +626,10 @@ async function handleAskQuestion(live: Live, id: number, params: unknown) {
     type: "question.resolved",
     requestId: id,
     decision: reply.kind,
+    // Cursor takes option ids alone, so that is all the transcript keeps.
+    ...(reply.kind === "answered"
+      ? { reply: { kind: "answered" as const, answers: reply.answers } }
+      : {}),
   });
 
   await live.acp

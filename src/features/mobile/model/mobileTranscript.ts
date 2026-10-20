@@ -277,6 +277,8 @@ function blockItem(block: Block, cwd: string): MobileTurnItem | null {
     };
   if (block.role === "handoff")
     return { type: "notice", id: block.id, text: block.text || "Handed off" };
+  if (block.role === "question" && block.text.trim())
+    return { type: "notice", id: block.id, text: block.text };
   if (block.role === "system" && block.text.trim())
     return {
       type: "notice",

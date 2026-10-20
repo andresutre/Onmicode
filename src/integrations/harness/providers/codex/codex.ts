@@ -10,6 +10,7 @@ import {
   questionPromptTitle,
   type UserQuestionReply,
 } from "../../../../features/sessions/model/userQuestion";
+import { replyAttachments } from "../../../../features/sessions/model/questionAnswers";
 import {
   killChild,
   resolveCodexBinary,
@@ -340,17 +341,26 @@ export function respondCodexQuestion(
     pending.resolve("cancelled");
     return;
   }
+  let params: Record<string, unknown>;
+  try {
+    // A steer is a user message, so images go as image input, not paths.
+    params = buildTurnSteerParams({
+      threadId: pending.threadId,
+      expectedTurnId: turnId,
+      prompt: text,
+      attachments: replyAttachments(pending.event.questions, reply),
+    });
+  } catch (error) {
+    live.onEvent({
+      type: "status",
+      text: `Could not send your answer to Codex: ${error instanceof Error ? error.message : String(error)}`,
+    });
+    return;
+  }
   pending.sending = true;
   keepCodexQuestionOpen(sessionId, requestId);
   void live.rpc
-    .request(
-      "turn/steer",
-      buildTurnSteerParams({
-        threadId: pending.threadId,
-        expectedTurnId: turnId,
-        prompt: text,
-      }),
-    )
+    .request("turn/steer", params)
     .then(() => {
       if (live.questions.get(requestId) === pending) pending.resolve(reply);
     })
@@ -1032,6 +1042,7 @@ function showCodexAsyncQuestion(
           : reply.kind === "answered"
             ? "answered"
             : "skipped",
+      ...(reply !== "cancelled" && reply.kind === "answered" ? { reply } : {}),
     });
     showNextQuestion(live);
   });
@@ -1380,6 +1391,7 @@ async function handleServerRequest(
           : reply.kind === "answered"
             ? "answered"
             : "skipped",
+      ...(reply !== "cancelled" && reply.kind === "answered" ? { reply } : {}),
     });
     showNextQuestion(live);
     if (reply !== "cancelled")

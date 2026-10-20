@@ -1368,6 +1368,86 @@ describe("clarifying questions", () => {
     expect(session.pendingQuestion).toBeUndefined();
   });
 
+  it("keeps what the user answered, with their files, in the transcript", () => {
+    let session = newSession("claude", "/repo");
+    session = applyHarnessEvent(session, {
+      type: "message.delta",
+      text: "Let me check.",
+    });
+    session = applyHarnessEvent(session, {
+      type: "question.asked",
+      requestId: 3,
+      questions,
+    });
+    session = applyHarnessEvent(session, {
+      type: "question.resolved",
+      requestId: 3,
+      decision: "answered",
+      reply: {
+        kind: "answered",
+        answers: { "Which file?": ["b.ts"] },
+        attachments: {
+          "Which file?": [
+            {
+              id: "shot",
+              name: "shot.png",
+              mimeType: "image/png",
+              kind: "image",
+              size: 4,
+              path: "/tmp/shot.png",
+              data: "aW1n",
+              previewUrl: "blob:shot",
+            },
+          ],
+        },
+      },
+    });
+    expect(session.pendingQuestion).toBeUndefined();
+    const answer = session.blocks.at(-1)!;
+    expect(answer).toMatchObject({
+      role: "question",
+      text: "Which file?\nb.ts\nAttached: shot.png",
+      answeredQuestions: [
+        {
+          id: "Which file?",
+          prompt: "Which file?",
+          answers: ["b.ts"],
+          attachments: [{ name: "shot.png", previewUrl: "blob:shot" }],
+        },
+      ],
+    });
+    // The answer closes the prose before it, so later text lands below.
+    expect(session.blocks[0]).toMatchObject({ role: "assistant" });
+    expect(session.blocks[0].streaming).toBeFalsy();
+
+    const persisted = sanitizeSessionForPersist(session).blocks.at(-1)!;
+    expect(persisted.answeredQuestions?.[0].attachments).toEqual([
+      {
+        id: "shot",
+        name: "shot.png",
+        mimeType: "image/png",
+        kind: "image",
+        size: 4,
+        path: "/tmp/shot.png",
+      },
+    ]);
+  });
+
+  it("leaves no answer behind when the user skips", () => {
+    let session = newSession("claude", "/repo");
+    session = applyHarnessEvent(session, {
+      type: "question.asked",
+      requestId: 3,
+      questions,
+    });
+    session = applyHarnessEvent(session, {
+      type: "question.resolved",
+      requestId: 3,
+      decision: "skipped",
+    });
+    expect(session.blocks).toEqual([]);
+  });
+
   it("drops a parked prompt when the turn stops", () => {
     let session = newSession("claude", "/repo");
     session = applyHarnessEvent(session, {

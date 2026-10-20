@@ -2,7 +2,11 @@ import { TurnNotReadyError } from "../../core/types";
 import { nativeModelId } from "../../../../features/sessions/model/models";
 import { taskListFromToolInput } from "../../../../features/sessions/model/taskList";
 import { normalizeProjectPath } from "../../../../features/projects/model/recents";
-import type { UserQuestionReply } from "../../../../features/sessions/model/userQuestion";
+import type {
+  UserQuestion,
+  UserQuestionReply,
+} from "../../../../features/sessions/model/userQuestion";
+import { answerText } from "../../../../features/sessions/model/questionAnswers";
 import type {
   CommandContext,
   NativeCommand,
@@ -1059,29 +1063,28 @@ async function handleExtensionUi(
     const replyPromise = new Promise<UserQuestionReply>((resolve) => {
       live.questions.set(uiId, { id: request.id, resolve });
     });
+    const question: UserQuestion = {
+      id: request.id,
+      prompt: extensionUiTitle(request),
+      multiSelect: false,
+      allowCustom: request.method !== "select",
+      options:
+        request.method === "select"
+          ? request.options.map((label, index) => ({
+              id: String(index),
+              label: extensionUiTitle({
+                id: request.id,
+                method: "notify",
+                title: label,
+              }),
+            }))
+          : [],
+    };
     live.onEvent({
       type: "question.asked",
       requestId: uiId,
       title: extensionUiTitle(request),
-      questions: [
-        {
-          id: request.id,
-          prompt: extensionUiTitle(request),
-          multiSelect: false,
-          allowCustom: request.method !== "select",
-          options:
-            request.method === "select"
-              ? request.options.map((label, index) => ({
-                  id: String(index),
-                  label: extensionUiTitle({
-                    id: request.id,
-                    method: "notify",
-                    title: label,
-                  }),
-                }))
-              : [],
-        },
-      ],
+      questions: [question],
     });
     const reply = await replyPromise;
     live.questions.delete(uiId);
@@ -1092,13 +1095,17 @@ async function handleExtensionUi(
         if (selected !== undefined && /^\d+$/.test(selected))
           value = request.options[Number(selected)];
       } else {
-        value = reply.custom?.[request.id];
+        // The reply is one string, so attached files go as paths below it.
+        value =
+          answerText(question, reply, reply.custom?.[request.id] ?? "") ||
+          undefined;
       }
     }
     live.onEvent({
       type: "question.resolved",
       requestId: uiId,
       decision: value === undefined ? "skipped" : "answered",
+      ...(value !== undefined && reply.kind === "answered" ? { reply } : {}),
     });
     await writeChild(
       sessionId,

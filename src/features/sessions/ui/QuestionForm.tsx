@@ -5,7 +5,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { Check, MessageSquare } from "../../../shared/ui/icons";
+import { Check, FilePlus, MessageSquare } from "../../../shared/ui/icons";
 import {
   CUSTOM_OPTION_ID,
   buildQuestionReply,
@@ -15,18 +15,31 @@ import {
   type UserQuestionPrompt,
   type UserQuestionReply,
 } from "../model/userQuestion";
+import type { Attachment } from "../model/session";
+import { useAnswerAttachments } from "../hooks/useAnswerAttachments";
+import { FILE_DROP_ZONE_ATTRIBUTE } from "../hooks/useFileDrop";
+import { AttachmentChip } from "./AttachmentChip";
 
 type Props = {
   prompt: UserQuestionPrompt;
   onReply: (requestId: number, reply: UserQuestionReply) => void;
   onInteraction?: (requestId: number) => void;
+  /** The harness can take files with an answer. */
+  attachments?: boolean;
 };
 
-export function QuestionForm({ prompt, onReply, onInteraction }: Props) {
+export function QuestionForm({
+  prompt,
+  onReply,
+  onInteraction,
+  attachments: attachmentsSupported = false,
+}: Props) {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [now, setNow] = useState(Date.now);
+  const formRef = useRef<HTMLFormElement>(null);
+  const attachButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (prompt.autoResolveAt == null) return;
@@ -50,13 +63,56 @@ export function QuestionForm({ prompt, onReply, onInteraction }: Props) {
   const index = Math.min(step, Math.max(total - 1, 0));
   const question = questions[index];
   const last = index >= total - 1;
+
+  /** Typing an answer of your own picks the option that takes it. */
+  const changeCustom = (target: UserQuestion, value: string) => {
+    setCustom((current) => ({ ...current, [target.id]: value }));
+    setAnswers((current) => {
+      const selected = current[target.id] ?? [];
+      if (target.multiSelect) {
+        const without = selected.filter((id) => !isCustomId(target, id));
+        return {
+          ...current,
+          [target.id]: [...without, customOptionId(target)],
+        };
+      }
+      return { ...current, [target.id]: [customOptionId(target)] };
+    });
+  };
+
+  const canAttach = attachmentsSupported && !!question?.allowCustom;
+  const attached = useAnswerAttachments({
+    requestId: prompt.requestId,
+    question,
+    enabled: canAttach,
+    zone: formRef,
+    onActivity: interact,
+    onPasteText: changeCustom,
+  });
+  const questionFiles = question ? (attached.files[question.id] ?? []) : [];
+
   const ready = useMemo(
-    () => (question ? questionIsComplete(question, answers, custom) : false),
-    [answers, custom, question],
+    () =>
+      question
+        ? !attached.reading &&
+          questionIsComplete(question, answers, custom, attached.files)
+        : false,
+    [answers, custom, question, attached.files, attached.reading],
   );
 
-  const finish = (nextAnswers = answers, nextCustom = custom) => {
-    onReply(prompt.requestId, buildQuestionReply(questions, nextAnswers, nextCustom));
+  const finish = (
+    nextAnswers = answers,
+    nextCustom = custom,
+    nextFiles: Record<string, Attachment[]> = attached.files,
+  ) => {
+    const reply = buildQuestionReply(
+      questions,
+      nextAnswers,
+      nextCustom,
+      nextFiles,
+    );
+    attached.settle(reply, nextFiles);
+    onReply(prompt.requestId, reply);
   };
 
   const skipCurrent = () => {
@@ -68,8 +124,9 @@ export function QuestionForm({ prompt, onReply, onInteraction }: Props) {
     const nextCustom = { ...custom };
     delete nextAnswers[question.id];
     delete nextCustom[question.id];
+    const nextFiles = attached.discard(question.id);
     if (last) {
-      finish(nextAnswers, nextCustom);
+      finish(nextAnswers, nextCustom, nextFiles);
       return;
     }
     setAnswers(nextAnswers);
@@ -105,12 +162,23 @@ export function QuestionForm({ prompt, onReply, onInteraction }: Props) {
       onChangeCapture={interact}
     >
       <form
-        className="rounded-lg border border-content/10 bg-content/3 px-3 py-2.5"
+        ref={formRef}
+        {...(canAttach ? { [FILE_DROP_ZONE_ATTRIBUTE]: "" } : {})}
+        aria-busy={attached.reading || undefined}
+        className={`relative rounded-lg border bg-content/3 px-3 py-2.5 ${
+          attached.fileDrag ? "border-accent/60" : "border-content/10"
+        }`}
         onSubmit={(event) => {
           event.preventDefault();
           continueCurrent();
         }}
+        onPaste={attached.onPaste}
       >
+        {attached.fileDrag ? (
+          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-[inherit] bg-accent/8 text-[12px] text-content/70">
+            Drop files to attach to your answer
+          </div>
+        ) : null}
         <div className="flex items-center gap-1.5">
           <MessageSquare
             className="size-3.5 shrink-0 text-content/45"
@@ -148,37 +216,66 @@ export function QuestionForm({ prompt, onReply, onInteraction }: Props) {
                 ),
               }))
             }
-            onCustom={(value) => {
-              setCustom((current) => ({ ...current, [question.id]: value }));
-              setAnswers((current) => {
-                const selected = current[question.id] ?? [];
-                if (question.multiSelect) {
-                  const without = selected.filter(
-                    (id) => !isCustomId(question, id),
-                  );
-                  return {
-                    ...current,
-                    [question.id]: [...without, customOptionId(question)],
-                  };
-                }
-                return {
-                  ...current,
-                  [question.id]: [customOptionId(question)],
-                };
-              });
-            }}
+            onCustom={(value) => changeCustom(question, value)}
           />
         </div>
+        {questionFiles.length > 0 || (canAttach && attached.reading) ? (
+          <div
+            role="group"
+            aria-label="Attached files"
+            className="mt-2 flex flex-wrap items-center gap-1.5"
+          >
+            {questionFiles.map((file) => (
+              <AttachmentChip
+                key={file.id}
+                attachment={file}
+                onRemove={() => {
+                  attached.remove(question.id, file.id);
+                  attachButtonRef.current?.focus();
+                }}
+              />
+            ))}
+            {attached.reading ? (
+              <span role="status" className="text-[11px] text-content/40">
+                Attaching…
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {attached.error ? (
+          <p role="alert" className="mt-2 text-[11px] text-red-400">
+            {attached.error}
+          </p>
+        ) : null}
         <div className="mt-2.5 flex items-center justify-end gap-2">
-          {prompt.autoResolveAt != null ? (
-            <span
-              className="mr-auto text-[11px] text-content/40"
-              title="Interact to keep this question open."
-            >
-              {prompt.autoResolveAt - now > 60_000
-                ? "Optional question"
-                : `Continues without an answer in ${Math.max(0, Math.ceil((prompt.autoResolveAt - now) / 1000))}s`}
-            </span>
+          {canAttach || prompt.autoResolveAt != null ? (
+            <div className="mr-auto flex min-w-0 items-center gap-2">
+              {canAttach ? (
+                <button
+                  ref={attachButtonRef}
+                  type="button"
+                  aria-label="Attach files to your answer"
+                  title="Attach files or images. You can also drop or paste them here."
+                  className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-content/55 hover:bg-content/10 hover:text-content"
+                  onClick={() =>
+                    attached.pick(() => attachButtonRef.current?.focus())
+                  }
+                >
+                  <FilePlus className="size-3.5" strokeWidth={1.75} />
+                  Attach
+                </button>
+              ) : null}
+              {prompt.autoResolveAt != null ? (
+                <span
+                  className="min-w-0 truncate text-[11px] text-content/40"
+                  title="Interact to keep this question open."
+                >
+                  {prompt.autoResolveAt - now > 60_000
+                    ? "Optional question"
+                    : `Continues without an answer in ${Math.max(0, Math.ceil((prompt.autoResolveAt - now) / 1000))}s`}
+                </span>
+              ) : null}
+            </div>
           ) : null}
           {index > 0 ? (
             <button

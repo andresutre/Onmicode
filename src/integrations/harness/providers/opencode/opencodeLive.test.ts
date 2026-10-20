@@ -1575,9 +1575,66 @@ describe("OpenCode child permission routing", () => {
         type: "question.resolved",
         requestId: request.requestId,
         decision: kind,
+        ...(kind === "answered"
+          ? {
+              reply: {
+                kind,
+                answers: { [question.id]: [question.options[0].id] },
+              },
+            }
+          : {}),
       });
     },
   );
+
+  it("sends an answer's files as paths after the chosen option", async () => {
+    const events: HarnessEvent[] = [];
+    const { done } = await startTurn(events);
+    onSseEvent?.({
+      type: "question.asked",
+      properties: {
+        id: "question_files",
+        sessionID: "session_1",
+        questions: [
+          { question: "Which design?", options: [{ label: "This one" }] },
+        ],
+      },
+    });
+    await waitFor(
+      () => events.some((event) => event.type === "question.asked"),
+      "question",
+    );
+    const request = events.find((event) => event.type === "question.asked")!;
+    const question = request.questions[0];
+    respondOpenCodeQuestion("opencode-live", request.requestId, {
+      kind: "answered",
+      answers: { [question.id]: [question.options[0].id] },
+      attachments: {
+        [question.id]: [
+          {
+            id: "mock",
+            name: "mock.png",
+            mimeType: "image/png",
+            kind: "image",
+            size: 4,
+            path: "/tmp/mock.png",
+          },
+        ],
+      },
+    });
+    idle();
+    await done;
+    expect(harnessHttp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: expect.stringContaining("/question/question_files/reply"),
+        body: JSON.stringify({
+          answers: [
+            ["This one", 'Attached file (read from disk): "/tmp/mock.png"'],
+          ],
+        }),
+      }),
+    );
+  });
 });
 
 it("closes an event stream that ended on its own when the session stops", async () => {

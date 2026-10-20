@@ -1,9 +1,11 @@
 import {
+  questionAttachments,
   questionsFromUnknown,
   selectedAnswerLabels,
   type UserQuestion,
   type UserQuestionReply,
 } from "../../../../features/sessions/model/userQuestion";
+import { answerParts } from "../../../../features/sessions/model/questionAnswers";
 import { asRecord } from "./codexProtocol";
 
 /** Async questions arrive on agentMessage items rather than server requests. */
@@ -39,7 +41,11 @@ export function codexAsyncQuestions(item: unknown): UserQuestion[] {
   });
 }
 
-/** Async answers are user messages, not replies to the already-accepted tool. */
+/**
+ * Async answers are user messages, not replies to the already-accepted tool.
+ * The files go along as the message's own input (see `replyAttachments`), so
+ * the text only says which question each one answers.
+ */
 export function codexAsyncQuestionResponse(
   questions: UserQuestion[],
   reply: UserQuestionReply,
@@ -47,7 +53,13 @@ export function codexAsyncQuestionResponse(
   if (reply.kind === "skipped") return "";
   return questions
     .flatMap((question) => {
-      const answers = selectedAnswerLabels(question, reply);
+      const files = questionAttachments(question, reply.attachments);
+      const answers = [
+        ...selectedAnswerLabels(question, reply),
+        ...(files.length
+          ? [`Attached: ${files.map((file) => file.name).join(", ")}`]
+          : []),
+      ];
       return answers.length
         ? [`${question.prompt}\n${answers.join("\n")}`]
         : [];
@@ -109,7 +121,8 @@ export function codexQuestionResponse(
   return {
     answers: Object.fromEntries(
       questions.flatMap((question) => {
-        const answers = selectedAnswerLabels(question, reply);
+        // request_user_input answers are strings, so files go as paths.
+        const answers = answerParts(question, reply);
         return answers.length ? [[question.id, { answers }]] : [];
       }),
     ),
