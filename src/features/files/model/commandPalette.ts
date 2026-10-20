@@ -48,6 +48,7 @@ const COMMANDS: { id: string; label: string; keybinding?: string; keywords?: str
   { id: "zoom-reset", label: "Reset Zoom", keybinding: "View: Reset Zoom", keywords: "scale" },
   { id: "new-window", label: "New Window", keybinding: "App: New Window" },
   { id: "check-updates", label: "Check for Updates", keywords: "upgrade version" },
+  { id: "show-welcome", label: "Show Welcome", keywords: "setup onboarding getting started agents" },
   { id: "reload", label: "Reload Onmicode", keybinding: "View: Reload", keywords: "refresh" },
 ];
 
