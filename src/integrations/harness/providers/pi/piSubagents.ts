@@ -8,6 +8,7 @@ import {
   toolKindFromName,
   toolTitle,
 } from "./piProtocol";
+import { piSubagentName } from "./piSubagentName";
 
 /** Pi extension results and omp TaskToolDetails are cumulative snapshots. */
 export function piSubagentEvents(
@@ -60,11 +61,12 @@ export function piSubagentEvents(
         ? "completed"
         : "in_progress";
     const name =
-      stringField(entry, "description") ??
-      readableTask(stringField(entry, "task")) ??
-      stringField(entry, "sessionName") ??
-      stringField(entry, "agent") ??
-      "Subagent";
+      piSubagentName({
+        description: stringField(entry, "description"),
+        task: stringField(entry, "task"),
+        sessionName: stringField(entry, "sessionName"),
+        agent: stringField(entry, "agent"),
+      }) ?? "Subagent";
     const agentType = stringField(entry, "agent");
     const model =
       stringField(entry, "model") ??
@@ -194,11 +196,6 @@ export function piSubagentEvents(
       });
   });
   return events;
-}
-
-/** pi-subagents hides task text from hosts behind this placeholder. */
-function readableTask(task: string | undefined): string | undefined {
-  return task && !/^\[[a-z ]*redacted\]$/i.test(task.trim()) ? task : undefined;
 }
 
 /** One background run from pi-subagents' async status widget. */

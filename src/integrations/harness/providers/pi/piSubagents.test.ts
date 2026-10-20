@@ -155,7 +155,7 @@ describe("Pi subagent snapshots", () => {
       (block) => block.tool?.kind === "agent",
     );
     expect(agents).toHaveLength(2);
-    expect(agents.map((block) => block.text)).toEqual(["first", "second"]);
+    expect(agents.map((block) => block.text)).toEqual(["First", "Second"]);
     expect(agents[0].agentRun?.steps[0].text).toBe("Read first.ts");
     expect(agents[0].tool?.status).toBe("completed");
     expect(agents[1].tool?.status).toBe("failed");
