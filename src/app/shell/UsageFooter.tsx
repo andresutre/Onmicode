@@ -14,6 +14,7 @@ import {
   unavailableRateLimits,
   type RateLimitProvider,
 } from "../../features/providers/model/rateLimits";
+import { hasUsageToShow } from "../../features/providers/model/usageProviders";
 import {
   getCachedRateLimits,
   loadRateLimits,
@@ -68,6 +69,7 @@ export type UsageFooterSession = {
 
 export function UsageFooter({
   providers,
+  otherProviders = [],
   session,
   project,
   terminals = [],
@@ -83,6 +85,8 @@ export function UsageFooter({
   pressureSlot,
 }: {
   providers: RateLimitProvider[];
+  /** Shown beside `providers` once they have usage to show. */
+  otherProviders?: RateLimitProvider[];
   session?: UsageFooterSession;
   project?: string;
   terminals?: RunningTerminal[];
@@ -104,6 +108,7 @@ export function UsageFooter({
 }) {
   const opencode = useCachedRateLimits("opencode");
   const showUsage =
+    otherProviders.length > 0 ||
     providers.some((provider) => provider !== "opencode") ||
     (providers.includes("opencode") && opencode.status !== "unavailable");
   const showTerminals = terminals.length > 0;
@@ -138,12 +143,13 @@ export function UsageFooter({
     >
       <UsageChips
         providers={providers}
+        otherProviders={otherProviders}
         session={session}
         project={project}
         onSelectAccount={onSelectAccount}
         onManageAccounts={onManageAccounts}
         variant={inset ? "inset" : "footer"}
-        fallback={
+        sessionChip={
           session ? (
             <SessionChip
               key={session.id ?? session.harness}
@@ -196,21 +202,26 @@ export function UsageFooter({
 /**
  * The provider usage chips and their refresh button, for the session footer
  * and anywhere else a conversation shows how much of its plan is left.
+ * `providers` show in full, signed out included, to offer sign-in.
+ * `otherProviders` follow as compact chips once they have usage to show,
+ * so every signed-in plan stays in view whichever agent the session uses.
  * `accountPicker` off keeps the chips to usage alone, for a conversation
  * whose account is not switched from here. `variant` `composer` matches
  * the composer's tool buttons instead of the footer.
  */
 export function UsageChips({
   providers,
+  otherProviders = [],
   session,
   project,
   onSelectAccount,
   onManageAccounts,
   accountPicker = true,
-  fallback = null,
+  sessionChip = null,
   variant = "footer",
 }: {
   providers: RateLimitProvider[];
+  otherProviders?: RateLimitProvider[];
   session?: UsageFooterSession;
   project?: string;
   onSelectAccount?: (
@@ -219,16 +230,18 @@ export function UsageChips({
   ) => void;
   onManageAccounts?: (provider: ProviderAccountProvider) => void;
   accountPicker?: boolean;
-  /** Shown when there is no usage to show. */
-  fallback?: ReactNode;
+  /** Leads for a session whose agent has no usage chip of its own. */
+  sessionChip?: ReactNode;
   variant?: UsageChipVariant;
 }) {
-  const wantClaude = providers.includes("claude");
-  const wantCodex = providers.includes("codex");
-  const wantOpencode = providers.includes("opencode");
-  const wantDevin = providers.includes("devin");
+  const wanted = [...providers, ...otherProviders];
+  const wantClaude = wanted.includes("claude");
+  const wantCodex = wanted.includes("codex");
+  const wantOpencode = wanted.includes("opencode");
+  const wantDevin = wanted.includes("devin");
   const [now, setNow] = useState(() => Date.now());
   const [refreshing, setRefreshing] = useState(false);
+  const [piRefreshKey, setPiRefreshKey] = useState(0);
   const [, setAccountsVersion] = useState(0);
   const inflight = useRef<Promise<void> | null>(null);
   const claudeAccountId =
@@ -289,9 +302,12 @@ export function UsageChips({
     wantDevin,
   ]);
 
+  const refreshPi = session?.harness === "pi";
   const refresh = useCallback(() => {
     if (inflight.current) return inflight.current;
     setRefreshing(true);
+    // Pi's chip gives up its own button while this one is beside it.
+    if (refreshPi) setPiRefreshKey((key) => key + 1);
     const jobs: Promise<unknown>[] = [];
     if (wantClaude && claudeAccountAvailable)
       jobs.push(loadRateLimits("claude", claudeAccountId, true));
@@ -312,6 +328,7 @@ export function UsageChips({
     claudeAccountId,
     codexAccountAvailable,
     codexAccountId,
+    refreshPi,
     wantClaude,
     wantCodex,
     wantOpencode,
@@ -440,8 +457,19 @@ export function UsageChips({
     [selectAccount],
   );
 
-  const showOpencodeChip = wantOpencode && opencode.status !== "unavailable";
-  const showUsage = wantClaude || wantCodex || showOpencodeChip || wantDevin;
+  const limitsFor: Record<RateLimitProvider, typeof claude> = {
+    claude,
+    codex,
+    opencode,
+    devin,
+  };
+  const primary = providers.filter(
+    (provider) => provider !== "opencode" || opencode.status !== "unavailable",
+  );
+  const others = otherProviders.filter(
+    (provider) =>
+      !providers.includes(provider) && hasUsageToShow(limitsFor[provider]),
+  );
   const claudeAccountProps = accountPicker
     ? {
         accounts: claudeAccounts,
@@ -467,57 +495,80 @@ export function UsageChips({
       }
     : {};
 
-  if (session?.harness === "pi") {
-    return (
+  const lead =
+    session?.harness === "pi" ? (
       <PiUsage
         key={`${session.id}:${session.model}`}
         model={session.model}
         now={now}
         variant={variant}
+        refreshKey={piRefreshKey}
+        showRefresh={others.length === 0}
       />
+    ) : primary.length > 0 ? null : (
+      sessionChip
     );
-  }
-  if (!showUsage) return <>{fallback}</>;
+  const chip = (provider: RateLimitProvider, compact: boolean) => {
+    switch (provider) {
+      case "claude":
+        return (
+          <UsageProviderChip
+            key={provider}
+            limits={claude}
+            now={now}
+            variant={variant}
+            compact={compact}
+            {...claudeAccountProps}
+            onReconnect={reconnectClaude}
+          />
+        );
+      case "codex":
+        return (
+          <UsageProviderChip
+            key={provider}
+            limits={codex}
+            now={now}
+            project={project}
+            variant={variant}
+            compact={compact}
+            {...codexAccountProps}
+            onConsumeReset={consumeCodexReset}
+            onReconnect={reconnectCodex}
+          />
+        );
+      case "opencode":
+        return (
+          <UsageProviderChip
+            key={provider}
+            limits={opencode}
+            now={now}
+            project={project}
+            variant={variant}
+            compact={compact}
+          />
+        );
+      case "devin":
+        // Devin has one login per machine, so there is no account picker.
+        return (
+          <UsageProviderChip
+            key={provider}
+            limits={devin}
+            now={now}
+            project={project}
+            variant={variant}
+            compact={compact}
+            onReconnect={reconnectDevin}
+          />
+        );
+    }
+  };
+
+  if (primary.length === 0 && others.length === 0) return <>{lead}</>;
   return (
     <>
-      {wantClaude ? (
-        <UsageProviderChip
-          limits={claude}
-          now={now}
-          variant={variant}
-          {...claudeAccountProps}
-          onReconnect={reconnectClaude}
-        />
-      ) : null}
-      {wantCodex ? (
-        <UsageProviderChip
-          limits={codex}
-          now={now}
-          project={project}
-          variant={variant}
-          {...codexAccountProps}
-          onConsumeReset={consumeCodexReset}
-          onReconnect={reconnectCodex}
-        />
-      ) : null}
-      {showOpencodeChip ? (
-        <UsageProviderChip
-          limits={opencode}
-          now={now}
-          project={project}
-          variant={variant}
-        />
-      ) : null}
-      {wantDevin ? (
-        // Devin has one login per machine, so there is no account picker.
-        <UsageProviderChip
-          limits={devin}
-          now={now}
-          project={project}
-          variant={variant}
-          onReconnect={reconnectDevin}
-        />
-      ) : null}
+      {lead}
+      {primary.map((provider) => chip(provider, false))}
+      {others.map((provider) => chip(provider, true))}
       <button
         type="button"
         className={USAGE_REFRESH_CLASSES[variant]}

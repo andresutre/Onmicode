@@ -18,10 +18,15 @@ export function PiUsage({
   model,
   now,
   variant = "footer",
+  refreshKey = 0,
+  showRefresh = true,
 }: {
   model?: string;
   now: number;
   variant?: UsageChipVariant;
+  /** Each change refreshes, for a footer whose own button covers Pi. */
+  refreshKey?: number;
+  showRefresh?: boolean;
 }) {
   const provider = piUsageProvider(model);
   if (!provider) {
@@ -45,6 +50,8 @@ export function PiUsage({
       provider={provider}
       now={now}
       variant={variant}
+      refreshKey={refreshKey}
+      showRefresh={showRefresh}
     />
   );
 }
@@ -53,10 +60,14 @@ function PiProviderUsage({
   provider,
   now,
   variant,
+  refreshKey,
+  showRefresh,
 }: {
   provider: PiUsageProvider;
   now: number;
   variant: UsageChipVariant;
+  refreshKey: number;
+  showRefresh: boolean;
 }) {
   const [limits, setLimits] = useState(() =>
     idleRateLimits(piBillingProvider(provider)),
@@ -101,6 +112,12 @@ function PiProviderUsage({
       window.removeEventListener("focus", onVisible);
     };
   }, [provider]);
+  const shownRefreshKey = useRef(refreshKey);
+  useEffect(() => {
+    if (shownRefreshKey.current === refreshKey) return;
+    shownRefreshKey.current = refreshKey;
+    refreshRef.current(true);
+  }, [refreshKey]);
   const fetching = limits.status === "fetching";
   return (
     <>
@@ -115,20 +132,22 @@ function PiProviderUsage({
             provider === "anthropic" ? "Pi · Anthropic" : "Pi · OpenAI Codex",
         }}
       />
-      <button
-        type="button"
-        aria-label="Refresh Pi usage"
-        title="Refresh Pi usage"
-        disabled={fetching}
-        onClick={() => refreshRef.current(true)}
-        className={`grid size-6 shrink-0 place-items-center ${variant === "inset" ? "rounded-full" : "rounded-md"} text-content/40 hover:bg-content/10 hover:text-content disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent`}
-      >
-        <RefreshCw
-          className={`size-2.5 ${fetching ? "motion-safe:animate-spin" : ""}`}
-          strokeWidth={1.75}
-          aria-hidden
-        />
-      </button>
+      {showRefresh ? (
+        <button
+          type="button"
+          aria-label="Refresh Pi usage"
+          title="Refresh Pi usage"
+          disabled={fetching}
+          onClick={() => refreshRef.current(true)}
+          className={`grid size-6 shrink-0 place-items-center ${variant === "inset" ? "rounded-full" : "rounded-md"} text-content/40 hover:bg-content/10 hover:text-content disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent`}
+        >
+          <RefreshCw
+            className={`size-2.5 ${fetching ? "motion-safe:animate-spin" : ""}`}
+            strokeWidth={1.75}
+            aria-hidden
+          />
+        </button>
+      ) : null}
     </>
   );
 }
