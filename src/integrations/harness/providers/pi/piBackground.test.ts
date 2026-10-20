@@ -35,6 +35,7 @@ import { PI_FLAVOR } from "./piFlavor";
 import { applyHarnessEvent } from "../../core/apply";
 import { newSession } from "../../../../features/sessions/model/session";
 import type { HarnessEvent, SendTurnInput } from "../../core/types";
+import { currentTurnSubagents } from "../../../../features/sessions/model/subagentTicker";
 
 const RUN = "03f354c2-7ab3-4f7a-8b1f-3f9e5fb89dd3";
 const NL = String.fromCharCode(10);
@@ -311,6 +312,66 @@ describe("Pi background subagents", () => {
       .blocks.find((block) => block.tool?.callId === "call-1");
     expect(row?.tool?.status).toBe("completed");
     expect(row?.agentRun?.name).toBe("Reply PONG");
+  });
+
+  it("counts a parallel workflow's subagents once each", async () => {
+    const dir = "/tmp/runs/" + RUN;
+    const tasks = [1, 2, 3].map((n) => ({
+      agent: "worker",
+      task: `Test run ${n}: reply OK`,
+    }));
+    transport.files.set(
+      `${dir}/status.json`,
+      JSON.stringify({
+        runId: RUN,
+        mode: "workflow",
+        state: "running",
+        steps: tasks.map((task, index) => ({
+          ...task,
+          label: `task-${index + 1}`,
+          status: "running",
+          sessionFile: `/sessions/child-${index}.jsonl`,
+        })),
+      }),
+    );
+    tasks.forEach((_, index) =>
+      transport.files.set(
+        `/sessions/child-${index}.jsonl`,
+        JSON.stringify({ type: "session", version: 3 }),
+      ),
+    );
+    const running = await start();
+    frame({ type: "agent_start" });
+    frame({
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "subagent",
+      args: { workflow: "parallel", args: { tasks }, async: true },
+    });
+    frame({
+      type: "tool_execution_end",
+      toolCallId: "call-1",
+      toolName: "subagent",
+      isError: false,
+      result: {
+        content: [{ type: "text", text: `Async workflow [${RUN}]` }],
+        details: { mode: "workflow", results: [], asyncId: RUN, asyncDir: dir },
+      },
+    });
+    frame({ type: "agent_end" });
+    frame({ type: "agent_settled" });
+    const subagents = () =>
+      currentTurnSubagents(
+        events.reduce(applyHarnessEvent, newSession("pi", "/repo")).blocks,
+      );
+    await vi.waitFor(() => expect(subagents()).toHaveLength(3));
+    expect(subagents().map((run) => run.name)).toEqual([
+      "Test run 1: reply OK",
+      "Test run 2: reply OK",
+      "Test run 3: reply OK",
+    ]);
+    await cancelPiTurn("pi-bg");
+    await running.turn;
   });
 
   it("lets the turn go when a finished run never wakes Pi", async () => {

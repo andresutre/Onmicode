@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { piSubagentEvents } from "./piSubagents";
+import { subagentName } from "../../../../features/sessions/model/transcriptActivity";
 import { applyHarnessEvent } from "../../core/apply";
 import { newSession } from "../../../../features/sessions/model/session";
 import type { HarnessEvent } from "../../core/types";
@@ -161,6 +162,94 @@ describe("Pi subagent snapshots", () => {
     expect(agents[1].tool?.status).toBe("failed");
     expect(agents[1].tool?.detail).toBe("Provider failed");
     expect(session.blocks[0].tool?.kind).toBe("other");
+  });
+
+  it("shows each child of a foreground parallel workflow while it runs", () => {
+    // As pi-subagents 0.79 streamed `workflow: "parallel"` with async:false.
+    const input = {
+      workflow: "parallel",
+      args: {
+        tasks: [
+          { agent: "scout", task: "Reply with exactly PONG1." },
+          { agent: "scout", task: "Reply with exactly PONG2." },
+        ],
+      },
+      async: false,
+    };
+    const update = (children: Array<Record<string, unknown>>) => ({
+      details: {
+        mode: "workflow",
+        results: [],
+        workflowChildren: { version: 1, children },
+      },
+    });
+    const events: HarnessEvent[] = [
+      {
+        type: "tool.started",
+        callId: "wf",
+        name: "subagent",
+        kind: "agent",
+        title: "2 parallel subagents",
+      },
+      ...piSubagentEvents(
+        "wf",
+        input,
+        update([
+          { childId: "task-1", state: "completed", runId: "r1" },
+          { childId: "task-2", state: "running", runId: "r2", agent: "scout" },
+        ]),
+        false,
+      ),
+    ];
+    let rows = events
+      .reduce(applyHarnessEvent, newSession("pi", "/repo"))
+      .blocks.filter((block) => block.tool?.kind === "agent");
+    expect(rows.map((row) => [row.tool?.callId, row.tool?.status])).toEqual([
+      ["wf:agent:task-1", "completed"],
+      ["wf:agent:task-2", "in_progress"],
+    ]);
+    expect(rows.map((row) => subagentName(row))).toEqual([
+      "Reply with exactly PONG1",
+      "Reply with exactly PONG2",
+    ]);
+
+    // The end lists both results under index 0, told apart by workflowKey.
+    events.push(
+      ...piSubagentEvents(
+        "wf",
+        input,
+        {
+          details: {
+            mode: "workflow",
+            results: [
+              {
+                index: 0,
+                workflowKey: "task-1",
+                agent: "scout",
+                exitCode: 0,
+                finalOutput: "PONG1",
+              },
+              {
+                index: 0,
+                workflowKey: "task-2",
+                agent: "scout",
+                exitCode: 0,
+                finalOutput: "PONG2",
+              },
+            ],
+            workflowChildren: { version: 1, children: [] },
+          },
+        },
+        true,
+      ),
+    );
+    rows = events
+      .reduce(applyHarnessEvent, newSession("pi", "/repo"))
+      .blocks.filter((block) => block.tool?.kind === "agent");
+    expect(rows.map((row) => [row.tool?.callId, row.tool?.status])).toEqual([
+      ["wf:agent:task-1", "completed"],
+      ["wf:agent:task-2", "completed"],
+    ]);
   });
 
   it("leaves unknown extension detail formats alone", () => {
