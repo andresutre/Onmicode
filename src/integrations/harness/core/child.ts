@@ -34,27 +34,6 @@ export function readHarnessTextFile(path: string): Promise<string> {
   });
 }
 
-export function prepareMonoCodexStore(
-  providerAccountId?: string,
-  threadId?: string,
-): Promise<{ home: string; hasThread: boolean }> {
-  return invoke("codex_mono_store_prepare", { providerAccountId, threadId });
-}
-
-export function copyMonoCodexThreads(
-  providerAccountId: string | undefined,
-  threadId: string,
-  paths: string[],
-  sqliteHome?: string,
-): Promise<void> {
-  return invoke("codex_mono_store_copy", {
-    providerAccountId,
-    threadId,
-    paths,
-    sqliteHome,
-  });
-}
-
 /** Copy a native Claude or Codex conversation into another account's home,
  * so that account resumes the same provider session id. */
 export function transferProviderSession(
@@ -68,16 +47,6 @@ export function transferProviderSession(
     fromAccountId,
     toAccountId,
     providerSessionId,
-  });
-}
-
-export function restoreMonoCodexAgentState(
-  providerAccountId: string | undefined,
-  threadId: string,
-): Promise<void> {
-  return invoke("codex_mono_store_restore_agent_state", {
-    providerAccountId,
-    threadId,
   });
 }
 
@@ -354,7 +323,6 @@ export async function spawnChild(
   cwd: string,
   account?: { provider: "claude" | "codex"; id: string },
   binaryProvider?: ConfigurableBinaryProvider,
-  codexStore?: "mono",
   /** `devin acp` only: start with an approval rule for every edit. */
   devinAskEdits?: boolean,
 ): Promise<void> {
@@ -372,7 +340,6 @@ export async function spawnChild(
     account,
     binaryProvider,
     binaryPath,
-    ...(codexStore ? { codexStore } : {}),
     ...(devinAskEdits ? { devinAskEdits } : {}),
   });
   if (typeof pid !== "number" || pid <= 0) return;

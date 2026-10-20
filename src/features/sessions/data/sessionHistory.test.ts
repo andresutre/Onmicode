@@ -10,7 +10,6 @@ import {
 } from "./sessionHistory";
 import { newSession } from "../model/session";
 import type { SessionSummary } from "./sessionStore";
-import type { OrchestrationRun } from "../../orchestration/model/orchestration";
 
 function summary(id: string, cwd: string, updatedAt = 1): SessionSummary {
   return {
@@ -42,37 +41,10 @@ describe("historyWithLiveSessions", () => {
     expect(merged[0].sidebarHidden).toBe(true);
   });
 
-  const run: OrchestrationRun = {
-    version: 1,
-    leadId: "lead",
-    cwd: "/tmp/project-a",
-    status: "active",
-    allowedHarnesses: ["codex"],
-    maxWorkers: 2,
-    cli: "monocode",
-    continuations: 0,
-    requests: {},
-    tasks: ["worker-a", "worker-b"].map((id) => ({
-      id,
-      sessionId: id,
-      title: id,
-      harness: "codex",
-      model: "codex:test",
-      prompt: "Task",
-      files: [id],
-      scopes: [id],
-      dependsOn: [],
-      status: "running",
-      accepted: false,
-      result: "",
-      delivered: false,
-    })),
-  };
-
   it("never lists an ephemeral session, even while it is working", () => {
     const run = {
       ...newSession("codex", "/tmp/project-a"),
-      id: "habit-run",
+      id: "ephemeral-run",
       title: "Skull · Daily useful PR check",
       ephemeral: true,
       busy: true,

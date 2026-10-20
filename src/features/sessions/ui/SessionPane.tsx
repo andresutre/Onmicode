@@ -321,7 +321,6 @@ const LocalSessionPane = memo(function LocalSessionPane({
   onPaneDragStart,
   transcriptPool,
 }: Props) {
-  const managed = false;
   const title = sessionDisplayTitle(session.title, session.harness);
   const isEmpty = session.blocks.length === 0;
   const editedPaths = useMemo(
@@ -416,7 +415,6 @@ const LocalSessionPane = memo(function LocalSessionPane({
     available:
       !remote &&
       !isEmpty &&
-      !managed &&
       !session.inboxAsk &&
       !session.worktreeRemoved &&
       !!onBtwSubmit &&
@@ -425,7 +423,6 @@ const LocalSessionPane = memo(function LocalSessionPane({
         sessionHasBtwThreads(session.blocks)),
     blocks: session.blocks,
     harness: session.harness,
-    managed,
     model: session.model,
     modelSettings: session.modelSettings,
     onSubmit: (turn, threadId, messageId, text, model, modelSettings) =>
@@ -582,7 +579,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
         !!session.inboxAsk ||
         (hideProjectPicker ? !showDeckProjectPicker : false)
       }
-      hideBranchPicker={!!session.inboxAsk || managed}
+      hideBranchPicker={!!session.inboxAsk}
       hideTopBar={!!session.inboxAsk}
       context={session.context}
       quoteRequest={quoteRequest}
@@ -617,7 +614,6 @@ const LocalSessionPane = memo(function LocalSessionPane({
       draftWorkspace={
         !session.inboxAsk &&
         !session.worktreeRemoved &&
-        !managed &&
         (remote
           ? !remoteSessionStarted
           : (isEmpty || !!session.workspaceMode) && !session.worktreeCwd)

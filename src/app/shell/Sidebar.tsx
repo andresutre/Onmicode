@@ -1854,7 +1854,7 @@ function SidebarComponent({
     const started = startedSessions.byParent.get(session.id);
     if (!started?.length) return renderSessionRow(session, compact);
     // Open while the thread or one of its sessions is the one in view, chosen
-    // or working, as an orchestrator's agents are.
+    // or working.
     const inPlay = (id: string) =>
       id === highlightedSessionId ||
       selectedSessionIds.has(id) ||
@@ -1872,9 +1872,8 @@ function SidebarComponent({
     return (
       <>
         {card}
-        {/* The rail drops from under the row's mark, as an orchestrator's
-            agents do. New launches grow in under it; the whole rail does
-            when it is the first. */}
+        {/* The rail drops from under the row's mark. New launches grow in
+            under it; the whole rail does when it is the first. */}
         <RevealHeight
           className="ml-2.5"
           data-started-sessions={session.id}
@@ -1885,7 +1884,7 @@ function SidebarComponent({
             {started.map((child) => (
               <RevealHeight
                 key={child.id}
-                className="zen-phase-step orchestration-tree-step"
+                className="zen-phase-step started-tree-step"
                 animateIn={
                   freshStarted.has(child.id) &&
                   !started.every((other) => freshStarted.has(other.id))
@@ -4095,7 +4094,7 @@ const NO_STARTED_SESSIONS: {
  * Sessions started through the app CLI are named `app-<caller>-<request>`, so
  * each finds its caller among the listed sessions. One a started session
  * started in turn joins the same top-level session. Sessions whose caller is
- * not listed, such as a Mono's, stay where they are.
+ * not listed stay where they are.
  */
 export function groupStartedSessions<T extends { id: string }>(
   sessions: readonly T[],
@@ -4688,7 +4687,7 @@ export const SessionCard = memo(function SessionCard({
    * layout's list. */
   dense?: boolean;
   /** A session another one started, on the rail under it: a smaller, muted
-   * title like an orchestrator's agent rows. */
+   * title. */
   nested?: boolean;
   /** How many listed sessions this one started through /operator. */
   startedCount?: number;
@@ -5094,7 +5093,7 @@ export const SessionCard = memo(function SessionCard({
                   nested ? "h-5 gap-1.5" : "h-6 gap-2"
                 }`}
               >
-                {/* A collapsed orchestrator or /operator thread shows a
+                {/* A collapsed /operator thread shows a
                     chevron in its mark's place on hover: selecting it opens
                     the rail below. */}
                 {expandable ? (

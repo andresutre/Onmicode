@@ -11,8 +11,8 @@ export function nextUnseenFinishedSessions({
   busyIds: ReadonlySet<string>;
   previousUnseenIds: ReadonlySet<string>;
   focusedSessionId?: string;
-  /** Sessions the user cannot focus or see as done, such as orchestration
-   * workers and inbox discussions. An unseen session stays loaded until it
+  /** Sessions the user cannot focus or see as done, such as inbox
+   * discussions. An unseen session stays loaded until it
    * is looked at, so marking one of these would keep it in memory for good. */
   untrackedIds?: ReadonlySet<string>;
 }): Set<string> {

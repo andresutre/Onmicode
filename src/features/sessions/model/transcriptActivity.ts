@@ -324,10 +324,8 @@ export function resolveToolCallDisplay(
 }
 
 /**
- * User turns, with handoffs and habit updates sitting on their own row. `managed` is for
- * a worker's own transcript, where the app-written turns are the orchestrator
- * talking to it — the whole prompt side of that conversation, and the only
- * thing its replies are answering.
+ * User turns, with handoffs sitting on their own row. `managed` shows the
+ * app-written turns too, as the prompts the replies are answering.
  */
 export function groupTurns(blocks: Block[], managed = false): Block[][] {
   const turns: Block[][] = [];

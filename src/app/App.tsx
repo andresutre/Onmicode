@@ -72,7 +72,6 @@ import {
   appViewForTab,
   appViewTabId,
   isViewTab,
-  monoForTab,
   nextDisplayedTabAfterClose,
   reconcileTitleTabOrder,
   type AppView,
@@ -760,7 +759,6 @@ type SubmitOptions = ComposerTurnOptions & {
   queuedMessageId?: string;
   planBlockId?: string;
   buildTarget?: PlanBuildTarget;
-  managed?: boolean;
   appRequestId?: string;
   /** An app request that may arrive mid-turn, steering or queuing as one typed here would. */
   followsUp?: boolean;
@@ -900,8 +898,6 @@ function filesInWorkspaceTabs(tabs: readonly WorkspaceTab[]): FilePaneTab[] {
     ...(tab.terminalPanes ?? []).flatMap((pane) => pane.files),
   ]);
 }
-
-/** Stable empty tab list for the title bar while a Mono is in full view. */
 
 /** Native sheet. `window.confirm` is swallowed when a macOS menu accelerator fires. */
 function confirmDiscardUnsaved(message: string): Promise<boolean> {
@@ -1480,14 +1476,7 @@ function Workspace({
             foregroundSurfaceRef.current.standaloneSessionId === sessionId ||
             (foregroundSurfaceRef.current.workspaceVisible &&
               !!tab &&
-              (leafIds(tab.layout).includes(sessionId) ||
-                tab.editorPanes.some((pane) =>
-                  pane.files.some(
-                    (file) =>
-                      file.id === pane.activeFileId &&
-                      file.agent?.sessionId === sessionId,
-                  ),
-                )))
+              leafIds(tab.layout).includes(sessionId))
           );
         },
         (batches) => {
@@ -1720,7 +1709,6 @@ function Workspace({
   }, [activeSkillCwd, active?.id, active?.harness]);
 
   const activeFile = activeTab ? focusedFileTab(activeTab) : undefined;
-  // A Mono belongs to no project, so its view keeps the project in place.
   const sidebarCwd =
     activeFile?.projectCwd ?? activeFile?.cwd ?? active?.cwd ?? projectCwd;
   const sidebarCwdRef = useRef(sidebarCwd);
@@ -1944,8 +1932,7 @@ function Workspace({
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
 
-  // Sessions that belong in the UI: a habit's hidden run is not one of them,
-  // and asks through its Mono's chat rather than on its own.
+  // Sessions that belong in the UI; ephemeral ones live only in memory.
   const promptableSessions = useMemo(
     () => sessions.filter((session) => !session.ephemeral),
     [sessions],
@@ -2071,15 +2058,6 @@ function Workspace({
         // Listening here makes close our job. Letting the default path run
         // calls JS `window.destroy`, which Tauri denies without a permission.
         event.preventDefault();
-        if (
-          IS_MAC &&
-          (await invoke<boolean>("mono_chat_keep_alive").catch(() => false))
-        ) {
-          flushHarnessEvents();
-          void persistLiveTranscripts(sessionsRef.current);
-          void hideCurrentWindow();
-          return;
-        }
         const toTray = loadCloseToTray();
         if (hasInFlightSessions(sessionsRef.current)) {
           flushHarnessEvents();
@@ -3129,14 +3107,9 @@ function Workspace({
         );
         const close = () => {
           setTabs(next);
-          // View tabs still need a valid workspace to return to underneath;
-          // a Mono's opens over it, so it moves there without revealing it.
-          if (nextActiveTabId) {
-            if (nextId && monoForTab(nextId)) {
-              setActiveTabIdState(nextActiveTabId);
-            } else if (!nextId || appViewForTab(nextId)) {
-              activateTab(nextActiveTabId);
-            }
+          // View tabs still need a valid workspace to return to underneath.
+          if (nextActiveTabId && (!nextId || appViewForTab(nextId))) {
+            activateTab(nextActiveTabId);
           }
           if (nextId) navigation.select?.(nextId);
         };
@@ -3817,8 +3790,6 @@ function Workspace({
 
   const onCloseTitleTab = useCallback(
     (id: string) => {
-      // The inset layout shows a Mono as its own tab, which closing another
-      // tab leaves alone.
       const closePlan = planWorkspaceTabClose({
         tabs: tabsRef.current,
         sessions: sessionsRef.current,
@@ -6379,23 +6350,6 @@ function Workspace({
       // Output already received belongs before the submitted user message.
       // Flush before reading the session too, since pending errors can settle it.
       flushHarnessEvents();
-      if (options?.managed) {
-        const target = sessionsRef.current.find((s) => s.id === sessionId);
-        if (
-          !target ||
-          target.busy ||
-          target.pendingSwitch ||
-          isPreparingHandoff(target) ||
-          removingSessionIds.current.has(sessionId)
-        ) {
-          options.onSettled?.({
-            status: "failed",
-            text: "",
-            error: "Session is unavailable or already running",
-          });
-          return false;
-        }
-      }
       if (
         removingSessionIds.current.has(sessionId) ||
         switchingWorktrees.current.has(sessionId) ||
@@ -6752,8 +6706,6 @@ function Workspace({
         ...(options?.appRequestId
           ? { appRequestId: options.appRequestId }
           : {}),
-        // The app writes these turns, not the user; hide them.
-        ...(options?.managed ? { internal: true } : {}),
       };
       const live = isLiveHarness(current.harness);
       const queuedHandoff =
@@ -9520,7 +9472,7 @@ function Workspace({
     ],
     insetLayout ? titleTabOrder : [],
   );
-  // Like a browser, a Mono or app tab can be the only tab. The project's lone
+  // Like a browser, an app tab can be the only tab. The project's lone
   // blank session tab stays underneath, out of the strip, until closing the
   // last of them shows it again.
   const shownViewTabId = settingsOpen
@@ -9728,8 +9680,6 @@ function Workspace({
   const onOpenSearch = useCallback(() => {
     workspaceNavigation.cancel();
     startTransition(() => {
-      // With the Mono closed in the same commit, no frame shows the
-      // workspace tab between the two views.
       rememberAppView("search");
       setFilePickerOpen(false);
       setSettingsOpen(false);
@@ -10802,8 +10752,8 @@ function Workspace({
     const open = dockVisible && !!dock;
     const side = dock && (open || dockClosingShown) ? dock.side : null;
     const size = dock?.size ?? 0;
-    // Only a dock opening or closing in place slides; a project switch or a
-    // mono covering the workspace shows or hides it at once.
+    // Only a dock opening or closing in place slides; a project switch shows
+    // or hides it at once.
     const previous = dockWasOpen.current;
     const inPlace = !!previous && sameProjectPath(previous.path, projectCwd);
     dockWasOpen.current = { path: projectCwd, open };

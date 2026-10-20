@@ -112,7 +112,7 @@ export function UsageProviderChip({
   onManageAccounts?: () => void;
   onConsumeReset?: (creditId?: string) => Promise<CodexRateLimitResetOutcome>;
   onReconnect?: () => Promise<void>;
-  /** `composer` matches the quiet tool buttons under a Mono's composer. */
+  /** `composer` matches the composer's quiet tool buttons. */
   variant?: UsageChipVariant;
 }) {
   const showRemaining = useShowRemainingUsage();

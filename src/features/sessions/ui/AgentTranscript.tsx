@@ -5,7 +5,6 @@ import {
   CircleDashed,
   Copy,
   FilePlusCorner,
-  ListBullet,
   Minus,
   Pencil,
   PenLine,
@@ -62,11 +61,6 @@ import { NoteMiniCard } from "../../notes/ui/NoteMiniCard";
 import { TerminalSpinner } from "./TerminalSpinner";
 import { Popover } from "../../../shared/ui/Popover";
 import { ProjectMascot } from "../../projects/ui/ProjectMascot";
-/** A message the app has not delivered to the agent yet. */
-type MessageDelivery = {
-  status: "pending" | "paused" | "failed";
-  error?: string;
-};
 import type { ApprovalDecision } from "../../../integrations/harness";
 import {
   isHarnessAuthError,
@@ -110,8 +104,6 @@ import { useBottomChatMotion } from "../hooks/useBottomChatMotion";
 import { useTranscriptSelection } from "../hooks/useTranscriptSelection";
 import type { TranscriptLayout } from "../../settings/model/appearance";
 import { AgentMarkdown } from "./AgentMarkdown";
-import { isEmojiOnlyMessage } from "../model/emojiMessage";
-import { attachmentPreviewSrc } from "../model/attachments";
 import { TranscriptSelectionMenu } from "./TranscriptSelectionMenu";
 import { parseUserMessageLink } from "../model/linkPreview";
 import { UserLinkPreview } from "./UserLinkPreview";
@@ -207,8 +199,6 @@ type Props = {
   onReturnToLatest?: () => void;
   busy?: boolean;
   cwd?: string;
-  /** Keeps short conversations at the bottom and skips prompt-to-top anchoring. */
-  bottomAligned?: boolean;
   /** Leaves token and speed details out of each turn's footer. */
   hideTurnMetrics?: boolean;
   harness?: HarnessId;
@@ -264,7 +254,6 @@ function AgentTranscriptComponent({
   onReturnToLatest,
   busy,
   cwd,
-  bottomAligned = false,
   hideTurnMetrics = false,
   harness,
   model,
@@ -344,7 +333,7 @@ function AgentTranscriptComponent({
     }
   }, [blocks]);
   const [visibleTurnCount, setVisibleTurnCount] = useState(
-    bottomAligned ? initialTurns : Math.min(FIRST_PAINT_TURNS, initialTurns),
+    Math.min(FIRST_PAINT_TURNS, initialTurns),
   );
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [loadEarlierError, setLoadEarlierError] = useState(false);
@@ -377,7 +366,7 @@ function AgentTranscriptComponent({
     onAddToChat !== undefined || onSaveSelectionNote !== undefined,
   );
   const transcriptLayout = useTranscriptLayout();
-  const promptAnchor = useTranscriptAnchor() && !bottomAligned;
+  const promptAnchor = useTranscriptAnchor();
   const lastUserId = lastUserBlockId(blocks, managed);
   const seenUserId = useRef(lastUserId);
   if (lastUserId !== seenUserId.current) {
@@ -485,13 +474,9 @@ function AgentTranscriptComponent({
     (el: HTMLDivElement | null) => {
       scroller.current = el;
       setScrollerEl(el);
-      // The Mono already has overscroll-none. Prefer native scrolling where
-      // supported so its first wheel event need not wait on a blocking listener.
-      const nativeOverscroll =
-        bottomAligned && CSS.supports?.("overscroll-behavior", "none");
-      lockOverscroll(nativeOverscroll ? null : el);
+      lockOverscroll(el);
     },
-    [bottomAligned, lockOverscroll],
+    [lockOverscroll],
   );
 
   useEffect(() => {
@@ -716,8 +701,6 @@ function AgentTranscriptComponent({
       if (!el.isConnected) return;
       syncTranscriptViewport(el);
       followTranscript(el);
-      if (bottomAligned && !stickToBottom.current)
-        setShowJump(!isNearBottom(el, 1));
     };
     const observer = new ResizeObserver(onResize);
     observer.observe(inner);
@@ -728,7 +711,7 @@ function AgentTranscriptComponent({
       observer.disconnect();
       stopTransitionEnd();
     };
-  }, [bottomAligned, scrollerEl, followTranscript, setShowJump, visible]);
+  }, [scrollerEl, followTranscript, visible]);
 
   useTurnScrollAnchor(scrollerEl, visible, stickToBottom, rememberScroll);
   useReplyReflowAnchor(
@@ -830,7 +813,7 @@ function AgentTranscriptComponent({
   }, [visibleTurnCount, turns.length, initialTurns]);
 
   useEffect(() => {
-    if (bottomAligned || !visible || visibleTurnCount >= initialTurns) return;
+    if (!visible || visibleTurnCount >= initialTurns) return;
     // Paint the opening window first, then warm one historical turn at a time.
     // Expanding all twenty at once forced a large synchronous WebKit layout.
     let timer = 0;
@@ -846,32 +829,16 @@ function AgentTranscriptComponent({
       cancelAnimationFrame(frame);
       clearTimeout(timer);
     };
-  }, [bottomAligned, initialTurns, visible, visibleTurnCount]);
+  }, [initialTurns, visible, visibleTurnCount]);
 
   const prepareToPrepend = useCallback(() => {
     const el = scroller.current;
     if (el) {
       prependHeight.current = el.scrollHeight;
       prependAnchor.current = null;
-      if (bottomAligned) {
-        const viewportTop = el.getBoundingClientRect().top;
-        for (const turn of el.querySelectorAll<HTMLElement>(
-          ".transcript-turn",
-        )) {
-          const rect = turn.getBoundingClientRect();
-          if (rect.bottom <= viewportTop) continue;
-          // Content coordinates keep subsequent native scrolling independent
-          // of the height added above this exact message.
-          prependAnchor.current = {
-            element: turn,
-            top: rect.top - viewportTop + el.scrollTop,
-          };
-          break;
-        }
-      }
     }
     stickToBottom.current = false;
-  }, [bottomAligned]);
+  }, []);
 
   const loadEarlier = useCallback(async () => {
     if (loadEarlierPending.current) return;
@@ -1058,21 +1025,21 @@ function AgentTranscriptComponent({
     visible,
     stickToBottom,
     blocks,
-    bottomAligned && !!busy && userTurnCount(blocks, managed) === 1,
+    false,
     !!busy,
     historicalBlockIds,
-    bottomAligned,
+    false,
     wheelHold,
-    bottomAligned,
+    false,
     rememberScroll,
   );
 
   return (
     <div
       ref={setScroller}
-      className={`agent-transcript h-full overflow-y-auto overscroll-none [overflow-anchor:none] font-mono text-[13px] leading-5${bottomAligned ? " mono-transcript-fades scrollbar-none" : ""}`}
+      className={`agent-transcript h-full overflow-y-auto overscroll-none [overflow-anchor:none] font-mono text-[13px] leading-5`}
     >
-      <TranscriptContent bottomAligned={bottomAligned}>
+      <TranscriptContent>
         {onReturnToLatest ? (
           <div className="flex justify-center px-4 py-2">
             <button
@@ -1429,32 +1396,11 @@ function AgentTranscriptComponent({
   );
 }
 
-function TranscriptContent({
-  bottomAligned,
-  children,
-}: {
-  bottomAligned: boolean;
-  children: ReactNode;
-}) {
+function TranscriptContent({ children }: { children: ReactNode }) {
   // The clip keeps the follow motion's in-flight offset out of scrollHeight.
-  if (!bottomAligned) {
-    return (
-      <div className="mx-auto w-full min-w-0 max-w-4xl overflow-clip">
-        <div
-          data-transcript-content
-          className="flex min-w-0 flex-col gap-1 pb-8"
-        >
-          {children}
-        </div>
-      </div>
-    );
-  }
   return (
-    <div className="mx-auto flex min-h-full w-full min-w-0 max-w-4xl flex-col justify-end overflow-clip pb-8">
-      <div
-        data-transcript-content
-        className="flex min-w-0 shrink-0 flex-col gap-1"
-      >
+    <div className="mx-auto w-full min-w-0 max-w-4xl overflow-clip">
+      <div data-transcript-content className="flex min-w-0 flex-col gap-1 pb-8">
         {children}
       </div>
     </div>
@@ -1466,7 +1412,7 @@ export const AgentTranscript = memo(
   function VisibleTranscript(props: Props) {
     return (
       <TranscriptVisibility.Provider value={props.visible ?? true}>
-        <TranscriptPacing.Provider value={!props.bottomAligned}>
+        <TranscriptPacing.Provider value={true}>
           <ToolDetailSession.Provider value={props.sessionId}>
             <AgentTranscriptComponent {...props} />
           </ToolDetailSession.Provider>
@@ -1590,13 +1536,10 @@ function TurnDuration({
   completedAt,
   copyText: output,
   onSaveNote,
-  onShowWork,
-  workExpanded,
   fromHarness,
   fromModel,
   onSecondOpinion,
   onHandoff,
-  revealOnHover = false,
 }: {
   elapsedMs: number | null;
   label?: string;
@@ -1608,15 +1551,11 @@ function TurnDuration({
   completedAt?: number;
   copyText?: string;
   onSaveNote?: (text: string) => void | Promise<void>;
-  onShowWork?: () => void;
-  workExpanded?: boolean;
   fromHarness?: HarnessId;
   /** The turn's own model, so a same-harness second opinion can hide it. */
   fromModel?: string;
   onSecondOpinion?: (target: ModelTarget) => void;
   onHandoff?: (target: ModelTarget) => void;
-  /** Sit in the gap under the turn and show on hover, as a sent message's do. */
-  revealOnHover?: boolean;
 }) {
   const label =
     completionLabel ?? formatWorkingDuration(elapsedMs, modelName, true);
@@ -1630,7 +1569,7 @@ function TurnDuration({
     <div
       data-turn-actions
       aria-label={label}
-      className={`flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden px-4 pt-1 pb-3 font-sans text-sm text-content/40${revealOnHover ? " turn-actions-hover" : ""}`}
+      className={`flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden px-4 pt-1 pb-3 font-sans text-sm text-content/40`}
     >
       <span className="flex shrink-0 items-center gap-1">
         {output ? (
@@ -1643,18 +1582,6 @@ function TurnDuration({
         ) : (
           <Check className="size-3.5" strokeWidth={1.75} />
         )}
-        {onShowWork ? (
-          <button
-            type="button"
-            title={workExpanded ? "Hide activity" : "Show activity"}
-            aria-label={workExpanded ? "Hide activity" : "Show activity"}
-            aria-expanded={!!workExpanded}
-            onClick={onShowWork}
-            className={`rounded-md p-1 outline-none hover:bg-content/8 hover:text-content/70 focus-visible:ring-1 focus-visible:ring-accent ${workExpanded ? "bg-content/8 text-content/70" : "text-content/40"}`}
-          >
-            <ListBullet className="size-3.5" strokeWidth={1.75} />
-          </button>
-        ) : null}
         {fromHarness && onHandoff ? (
           <HandoffButton from={fromHarness} onPick={onHandoff} />
         ) : null}
@@ -1954,18 +1881,12 @@ function EditLastTurnButton({
 const TranscriptBlock = memo(function TranscriptBlock({
   block,
   layout,
-  bubbleTail = false,
-  compactFollowUp = false,
-  stackedOnPrevious = false,
-  delivery,
-  onRetryMessage,
   visible,
   revealOnMount,
   stickyIndex,
   underLine = false,
   embedded = false,
   cwd,
-  localMedia = false,
   onApproval,
   onSaveNote,
   onSendDraft,
@@ -1983,12 +1904,6 @@ const TranscriptBlock = memo(function TranscriptBlock({
 }: {
   block: Block;
   layout: TranscriptLayout;
-  bubbleTail?: boolean;
-  compactFollowUp?: boolean;
-  /** True when this message stacks onto the one above it. */
-  stackedOnPrevious?: boolean;
-  delivery?: MessageDelivery;
-  onRetryMessage?: (blockId: string) => void;
   visible?: boolean;
   revealOnMount?: boolean;
   stickyIndex: number;
@@ -1997,8 +1912,6 @@ const TranscriptBlock = memo(function TranscriptBlock({
   /** True when the parent surface already provides the horizontal gutter. */
   embedded?: boolean;
   cwd?: string;
-  /** Show local images and videos a reply links to, as Mono chats do. */
-  localMedia?: boolean;
   onApproval?: (requestId: number, decision: ApprovalDecision) => void;
   onSaveNote?: (text: string) => void | Promise<void>;
   onSendDraft?: (block: Block) => boolean | void;
@@ -2019,11 +1932,6 @@ const TranscriptBlock = memo(function TranscriptBlock({
       <UserMessageBlock
         block={block}
         layout={layout}
-        bubbleTail={bubbleTail}
-        compactFollowUp={compactFollowUp}
-        stackedOnPrevious={stackedOnPrevious}
-        delivery={delivery}
-        onRetryMessage={onRetryMessage}
         visible={visible ?? true}
         stickyIndex={stickyIndex}
         cwd={cwd}
@@ -2143,7 +2051,6 @@ const TranscriptBlock = memo(function TranscriptBlock({
         revealOnMount={revealOnMount}
         cwd={cwd}
         onOpenFile={onOpenFile}
-        localMedia={localMedia}
       />
     </div>
   );
@@ -2152,11 +2059,6 @@ const TranscriptBlock = memo(function TranscriptBlock({
 function UserMessageBlock({
   block,
   layout,
-  bubbleTail = false,
-  compactFollowUp = false,
-  stackedOnPrevious = false,
-  delivery,
-  onRetryMessage,
   visible,
   stickyIndex,
   onEdit,
@@ -2168,11 +2070,6 @@ function UserMessageBlock({
 }: {
   block: Block;
   layout: TranscriptLayout;
-  bubbleTail?: boolean;
-  compactFollowUp?: boolean;
-  stackedOnPrevious?: boolean;
-  delivery?: MessageDelivery;
-  onRetryMessage?: (blockId: string) => void;
   visible: boolean;
   stickyIndex: number;
   onEdit?: () => void;
@@ -2199,19 +2096,8 @@ function UserMessageBlock({
     : text;
   const chat = layout === "chat";
   const messageAt = block.sentAt ?? block.startedAt;
-  const chatSpacing = compactFollowUp
-    ? "pt-1 pb-0"
-    : bubbleTail && (block.sentAt != null || stackedOnPrevious)
-      ? "pt-1 pb-5"
-      : "pt-1.5 pb-5";
-  // A Mono's chat shows sent images above the bubble, like photos in a
-  // messaging app; only other files stay inside it.
-  const photos =
-    bubbleTail && chat && !block.draft
-      ? (block.attachments ?? []).filter(
-          (file) => file.kind === "image" && attachmentPreviewSrc(file),
-        )
-      : [];
+  const chatSpacing = "pt-1.5 pb-5";
+  const photos: Attachment[] = [];
   const bubbleAttachments = photos.length
     ? block.attachments!.filter((file) => !photos.includes(file))
     : block.attachments;
@@ -2297,57 +2183,9 @@ function UserMessageBlock({
     if (overflows) setExpanded((value) => !value);
   };
 
-  const deliveryControl =
-    delivery && delivery.status !== "pending" ? (
-      <div className="flex max-w-full items-center gap-2 px-3 pt-1 font-sans text-xs text-content/50">
-        <span role={delivery.error ? "alert" : "status"}>
-          {delivery.error ? `Not sent · ${delivery.error}` : "Not sent"}
-        </span>
-        {onRetryMessage ? (
-          <button
-            type="button"
-            onClick={() => onRetryMessage(block.id)}
-            className="shrink-0 rounded px-1 py-0.5 text-content/70 hover:bg-content/8"
-          >
-            {delivery.status === "failed" ? "Retry" : "Resume"}
-          </button>
-        ) : null}
-      </div>
-    ) : null;
-  // In a Mono's chat a few emoji stand alone, like a reaction: no bubble,
-  // time or actions.
-  if (
-    bubbleTail &&
-    chat &&
-    textOnly &&
-    !monocode &&
-    !messageLink &&
-    isEmojiOnlyMessage(displayText)
-  ) {
-    return (
-      <div
-        data-prompt-anchor={block.id}
-        data-message-delivery={delivery?.status}
-        data-message-stack={compactFollowUp ? "true" : undefined}
-        className={`user-message-row flex flex-col items-end pr-4 pl-14 ${chatSpacing}`}
-      >
-        <div
-          data-chat-message={block.id}
-          data-chat-message-role="user"
-          className="relative select-none font-sans text-6xl leading-none"
-        >
-          {displayText.trim()}
-        </div>
-        {deliveryControl}
-      </div>
-    );
-  }
-
   return (
     <div
       data-prompt-anchor={block.id}
-      data-message-delivery={delivery?.status}
-      data-message-stack={compactFollowUp ? "true" : undefined}
       data-editing-last-turn={editing ? "true" : undefined}
       className={`user-message-row group/usermsg overflow-visible ${
         chat
@@ -2506,9 +2344,7 @@ function UserMessageBlock({
             </div>
           )}
         </div>
-        {deliveryControl}
-        {!compactFollowUp &&
-        (text || block.attachments?.length || messageAt != null || onEdit) ? (
+        {(text || block.attachments?.length || messageAt != null || onEdit) ? (
           <div className="user-message-actions flex items-center gap-1 px-3 pt-1">
             {text || block.attachments?.length ? (
               <CopyTurnButton
@@ -4649,10 +4485,6 @@ function followsAfterScroll(
   // A small downward reversal while reading inside the bottom margin must
   // not restart following. Resume only when the reader reaches the end.
   return movement > 0 && el.scrollHeight - el.scrollTop - el.clientHeight <= 1;
-}
-
-function isNearBottom(el: HTMLElement, threshold = NEAR_BOTTOM_PX): boolean {
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
 }
 
 function scrollClampedToBottom(el: HTMLElement, previousTop: number): boolean {

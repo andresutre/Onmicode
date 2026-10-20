@@ -155,7 +155,7 @@ export async function mobileCatalog(
   }
   return {
     projects,
-    // The phone app still reads this list; Onmicode has no Monos.
+    // Older phone apps still read this list.
     monos: [],
     sessions: [...sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt),
   };

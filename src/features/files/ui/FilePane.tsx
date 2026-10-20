@@ -7,7 +7,6 @@ import {
 } from "../../sessions/ui/MarkdownModeToggle";
 import { SurfaceTabs } from "../../workspace/ui/SurfaceTabs";
 import {
-  isAgentTab,
   isChangesTab,
   isCommitTab,
   isPlanTab,
@@ -29,7 +28,6 @@ import {
   loadDiffViewer,
   subscribeDiffViewer,
 } from "../../settings/model/settings";
-import { AgentTabView } from "../../sessions/ui/AgentTabView";
 import { MarkdownPreview } from "../../sessions/ui/AgentMarkdown";
 import { BinaryFileView } from "./BinaryFileView";
 import { ReleaseNotesSurface } from "../../../app/ui/ReleaseNotesSurface";
@@ -171,16 +169,6 @@ function FilePaneComponent({
                   focusPath={file.path}
                   focusKind={file.changeKind}
                 />
-              ) : isAgentTab(file) ? (
-                <AgentTabView
-                  title={file.path}
-                  session={sessions.find(
-                    (entry) => entry.id === file.agent.sessionId,
-                  )}
-                  visible={visible && file.id === pane.activeFileId}
-                  focused={focused && file.id === pane.activeFileId}
-                  onOpenFile={onOpenFile}
-                />
               ) : isPlanTab(file) ? (
                 <PlanSurface
                   file={file}
@@ -263,8 +251,8 @@ export const FilePane = memo(FilePaneComponent, (previous, next) => {
   }
 
   for (const file of next.pane.files) {
-    // Plans and agent tabs both read a live session object from this pane.
-    const sessionId = file.plan?.sessionId ?? file.agent?.sessionId;
+    // Plans read a live session object from this pane.
+    const sessionId = file.plan?.sessionId;
     if (!sessionId) continue;
     const before = previous.sessions.find(
       (session) => session.id === sessionId,

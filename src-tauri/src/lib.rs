@@ -1,13 +1,12 @@
 use tauri::Manager;
 
 mod account_identity;
-mod artifacts;
 mod automations;
 mod azure_devops;
 mod background_work;
 mod chat_background;
 mod checkpoint;
-mod codex_mono_store;
+mod codex_rollouts;
 mod control;
 pub mod control_cli;
 mod cursor_store;
@@ -31,10 +30,6 @@ mod mcp;
 mod menu;
 mod mobile_access;
 mod mobile_router;
-mod mono;
-#[cfg(target_os = "macos")]
-mod mono_chat;
-mod mono_transcript;
 mod notes;
 mod notifications;
 mod pasteboard;
@@ -272,9 +267,6 @@ pub fn run() {
                 .with_filter(window::is_workspace_window)
                 .build(),
         )
-        .register_uri_scheme_protocol(artifacts::HTML_SCHEME, |ctx, request| {
-            artifacts::serve_html(ctx.app_handle(), &request)
-        })
         .manage(harness::HarnessHost::new())
         .manage(pty::PtyHost::new())
         .manage(remote::RemoteConnections::default())
@@ -292,7 +284,6 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 quick_composer::init(app.handle())?;
-                mono_chat::init(app.handle())?;
                 macos::install_dock_menu(app.handle());
                 if let Some(window) = app.get_webview_window("main") {
                     macos::install(&window);
@@ -328,14 +319,7 @@ pub fn run() {
             remote::remote_ssh_poll,
             remote::remote_ssh_answer,
             remote::remote_ssh_cancel,
-            control::control_enable,
-            control::control_disable,
             control::control_reply,
-            control::control_save,
-            control::control_load,
-            control::control_scopes,
-            control::control_write_path,
-            control::control_attach_worker,
             control::control_authorize_turn,
             control::control_turn_finished,
             control::app_cli_path,
@@ -445,12 +429,9 @@ pub fn run() {
             fs::git_stash,
             worktrees::git_worktrees,
             worktrees::git_worktree_create,
-            worktrees::git_orchestration_worktree_create,
             worktrees::git_worktree_rename_branch,
             worktrees::git_worktree_check_remove,
             worktrees::git_worktree_remove,
-            worktrees::git_orchestration_worktree_remove,
-            worktrees::git_orchestration_branch_remove,
             fs::create_path,
             fs::rename_path,
             fs::delete_path,
@@ -504,9 +485,6 @@ pub fn run() {
             harness::harness_resolve_antigravity,
             harness::harness_free_port,
             harness::harness_spawn,
-            codex_mono_store::codex_mono_store_prepare,
-            codex_mono_store::codex_mono_store_copy,
-            codex_mono_store::codex_mono_store_restore_agent_state,
             provider_session_transfer::provider_session_transfer,
             harness::harness_write,
             harness::harness_kill,
@@ -538,10 +516,6 @@ pub fn run() {
             session_store::cancel_session_search,
             session_store::session_get,
             session_store::session_tool_detail,
-            mono_transcript::mono_session_get,
-            mono_transcript::mono_session_page,
-            mono_transcript::mono_session_upsert,
-            mono_transcript::mono_session_find,
             session_store::session_delete,
             session_store::session_set_archived,
             session_store::session_set_pinned,
@@ -554,16 +528,9 @@ pub fn run() {
             notes::notes_list,
             notes::notes_get,
             notes::notes_upsert,
-            artifacts::artifacts_list,
-            artifacts::artifacts_get,
-            artifacts::artifacts_upsert,
-            artifacts::artifacts_delete,
             notes::notes_delete,
             notes::notes_save_image,
             notes::notes_image_path,
-            mono::mono_load,
-            mono::mono_read,
-            mono::mono_save,
             checkpoint::session_checkpoint_ensure,
             checkpoint::session_checkpoint_begin_turn,
             checkpoint::session_checkpoint_finish_turn,
@@ -617,28 +584,6 @@ pub fn run() {
             quick_composer::git_popup::quick_git_complete,
             #[cfg(target_os = "macos")]
             quick_composer::git_popup::quick_composer_dismiss,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_chat_sync,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_chat_publish,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_chat_state,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_chat_ready,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_chat_action,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_chat_take,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_chat_accept,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_chat_reply,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_chat_keep_alive,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_chat_switch,
-            #[cfg(target_os = "macos")]
-            mono_chat::mono_menu_bar_set_visible,
             window_transfer::stage_window_transfer,
             window_transfer::take_window_transfer,
             chat_background::save_chat_background,
@@ -687,8 +632,6 @@ pub fn run() {
                 .iter()
                 .any(|window| window.label() != label);
             control::window_closed(handle, &label);
-            #[cfg(target_os = "macos")]
-            mono_chat::window_closed(handle, &label);
             if !other_window {
                 reap_harness_children(handle);
             }

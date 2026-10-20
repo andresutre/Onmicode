@@ -8,7 +8,6 @@ import {
 import {
   leaf,
   leafIds,
-  newAgentTab,
   newChangesTab,
   newCommitTab,
   newFileTab,
@@ -243,18 +242,18 @@ describe("collectWorkspaceSnapshot", () => {
     expect(snapshot.projectTerminals).toEqual([]);
   });
 
-  it("drops agent tabs, and the pane holding only them", () => {
+  it("drops worker tabs older builds saved, and the pane holding only them", () => {
     const file = newFileTab("/tmp/a/README.md", "/tmp/a");
-    const agent = newAgentTab("Audit the UI", "/tmp/a", {
-      sessionId: "worker",
-      leadId: "s1",
-      harness: "codex",
-    });
-    const mixed = newAgentTab("Audit the engine", "/tmp/a", {
-      sessionId: "worker-2",
-      leadId: "s1",
-      harness: "codex",
-    });
+    // Saved by builds that had orchestration workers.
+    const legacyAgentTab = (path: string, sessionId: string) =>
+      ({
+        id: crypto.randomUUID(),
+        path,
+        cwd: "/tmp/a",
+        agent: { sessionId, leadId: "s1", harness: "codex" },
+      }) as ReturnType<typeof newFileTab>;
+    const agent = legacyAgentTab("Audit the UI", "worker");
+    const mixed = legacyAgentTab("Audit the engine", "worker-2");
     const tab = {
       ...newTab("s1"),
       id: "t1",
