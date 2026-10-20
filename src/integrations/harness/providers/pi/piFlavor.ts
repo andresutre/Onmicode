@@ -30,7 +30,8 @@ export const PI_FLAVOR: PiFlavor = {
   resolveBinary: resolvePiBinary,
   resumeFlag: "--session",
   isolateFlags: ["--no-tools", "--no-skills", "--no-context-files"],
-  planTools: ["read", "grep", "find", "ls"],
+  // `ask_user` comes from the extension Onmicode loads into every Pi session.
+  planTools: ["read", "grep", "find", "ls", "ask_user"],
   probeChildId: "monocode-pi-probe",
   textChildId: "monocode-pi-text",
 };

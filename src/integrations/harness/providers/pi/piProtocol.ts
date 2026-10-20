@@ -5,6 +5,13 @@ import {
 } from "../../../../features/sessions/model/attachments";
 import type { AgentModel, ModelSetting } from "../../../../features/sessions/model/models";
 import { isTaskListToolName } from "../../../../features/sessions/model/taskList";
+import {
+  questionsFromUnknown,
+  selectedAnswerLabels,
+  type UserQuestion,
+  type UserQuestionReply,
+} from "../../../../features/sessions/model/userQuestion";
+import { answerText } from "../../../../features/sessions/model/questionAnswers";
 import type { PiFlavor } from "./piFlavor";
 import { extractToolPreview, titleFromToolInput } from "../../core/preview";
 import { upstreamProviderName } from "../../core/providerNames";
@@ -58,6 +65,8 @@ export type PiExtensionUiRequest =
       id: string;
       method: "input" | "editor";
       title: string;
+      /** `editor` only: the text the dialog opens with. */
+      prefill?: string;
     }
   | {
       id: string;
@@ -293,7 +302,16 @@ export function parseExtensionUiRequest(
     };
   }
   if (method === "input" || method === "editor") {
-    return { id, method, title: stringField(rec, "title") ?? method };
+    const prefill =
+      method === "editor" && typeof rec.prefill === "string"
+        ? rec.prefill
+        : undefined;
+    return {
+      id,
+      method,
+      title: stringField(rec, "title") ?? method,
+      ...(prefill !== undefined ? { prefill } : {}),
+    };
   }
   if (
     method === "notify" ||
@@ -316,6 +334,40 @@ export function parseExtensionUiRequest(
     };
   }
   return null;
+}
+
+/**
+ * Title of the dialog Onmicode's `ask_user` extension (src-tauri/src/
+ * pi_ask_user.mjs) opens: an `editor` whose prefill holds the questions.
+ */
+export const PI_ASK_USER_TITLE = "onmicode:ask_user";
+
+/** The questions of an `ask_user` dialog, or null for any other dialog. */
+export function askUserFromRequest(
+  request: PiExtensionUiRequest,
+): { questions: UserQuestion[]; callId?: string } | null {
+  if (request.method !== "editor" || request.title !== PI_ASK_USER_TITLE)
+    return null;
+  const payload = tryParseJsonRecord(request.prefill ?? "");
+  const questions = questionsFromUnknown(payload?.questions);
+  if (questions.length === 0) return null;
+  const callId = stringField(payload ?? {}, "toolCallId");
+  return { questions, ...(callId ? { callId } : {}) };
+}
+
+/** The `ask_user` dialog's reply: each answered question with its answer. */
+export function askUserReplyValue(
+  questions: UserQuestion[],
+  reply: UserQuestionReply,
+): string | undefined {
+  if (reply.kind !== "answered") return undefined;
+  const answers = questions.flatMap((question) => {
+    const labels = selectedAnswerLabels(question, reply);
+    // The answer is text, so attached files go as paths Pi can read.
+    const answer = answerText(question, reply, labels.join(", "));
+    return answer ? [{ question: question.prompt, answer }] : [];
+  });
+  return answers.length > 0 ? JSON.stringify({ answers }) : undefined;
 }
 
 export function extensionUiResponse(
