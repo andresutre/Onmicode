@@ -2445,6 +2445,39 @@ html:not(.theme-light) .markdown-code-token {
   }
 }
 
+/* The subagent ticker's line slides up as it moves to the next run. */
+.subagent-ticker-line {
+  animation: subagent-ticker-in 350ms ease-out;
+}
+
+@keyframes subagent-ticker-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+/* A run's transcript row, flashed when the ticker jumps to it. */
+.subagent-row-flash {
+  animation: subagent-row-flash 1200ms ease-out;
+}
+
+@keyframes subagent-row-flash {
+  0%,
+  40% {
+    background-color: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    box-shadow: inset 0 0 0 1px
+      color-mix(in srgb, var(--color-accent) 45%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-ticker-line,
+  .subagent-row-flash {
+    animation: none;
+  }
+}
+
 /* Two-frame mascot loop — a hard swap plus a one-pixel hop, arcade style. */
 .mascot-active {
   animation: mascot-hop var(--mascot-beat, 460ms) infinite;

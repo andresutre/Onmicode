@@ -44,6 +44,7 @@ import {
 } from "../model/session";
 import { sessionHasBtwThreads, supportsBtwHarness } from "../model/btw";
 import { BtwSheet, useBtwConversation } from "./BtwSheet";
+import { SubagentTicker } from "./SubagentTicker";
 import { AgentTranscript } from "./AgentTranscript";
 import { PooledTranscript, type TranscriptPool } from "./TranscriptPool";
 import { TranscriptFind } from "./TranscriptFind";
@@ -966,6 +967,10 @@ const LocalSessionPane = memo(function LocalSessionPane({
               inert={btw.open}
               className="mx-auto w-full max-w-4xl shrink-0"
             >
+              <SubagentTicker
+                blocks={session.blocks}
+                busy={!!session.busy}
+              />
               {composer}
             </div>
           ) : null}

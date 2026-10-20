@@ -559,7 +559,8 @@ const MAX_SUBAGENT_NAME = 56;
  */
 export function subagentName(block: Block): string {
   const brief = subagentBrief(block);
-  const sentence = (brief.match(/^[^.!?]*[.!?]?/)?.[0] ?? brief).trim();
+  // A sentence ends at punctuation before a space, not inside `App.tsx`.
+  const sentence = (brief.match(/^.*?[.!?](?=\s|$)/s)?.[0] ?? brief).trim();
   const name = sentence || brief;
   if (name.length <= MAX_SUBAGENT_NAME) return name;
   const cut = name.slice(0, MAX_SUBAGENT_NAME);

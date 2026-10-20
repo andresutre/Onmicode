@@ -187,7 +187,7 @@ describe("Pi background subagents", () => {
     expect(running.settled()).toBe(false);
     expect(events).toContainEqual({
       type: "background.updated",
-      tasks: ["scout"],
+      tasks: ["Reply PONG"],
     });
 
     frame(asyncWidget("complete"));
@@ -260,7 +260,7 @@ describe("Pi background subagents", () => {
       session.blocks.find((block) => block.tool?.callId === "call-1")?.tool
         ?.status,
     ).toBe("in_progress");
-    expect(session.backgroundTasks).toEqual(["scout", "worker"]);
+    expect(session.backgroundTasks).toEqual(["Reply PONG", "worker"]);
 
     // Its own notice still ends it.
     completionNotice();

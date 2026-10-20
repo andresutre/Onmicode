@@ -37,6 +37,7 @@ import {
   runRowStatus,
   type PiBackgroundSnapshot,
 } from "./piSubagents";
+import { piSubagentLaunchTitle } from "./piSubagentName";
 import {
   addPiTurnUsage,
   agentEndWillRetry,
@@ -907,7 +908,9 @@ function noteBackgroundLaunch(
 ): void {
   const known = live.backgroundRuns.get(runId);
   const label =
-    stringField(tool.input, "agent") ?? known?.label ?? "Background subagent";
+    piSubagentLaunchTitle(tool.input) ??
+    known?.label ??
+    "Background subagent";
   const run: BackgroundRun = {
     label,
     rowId: tool.id,

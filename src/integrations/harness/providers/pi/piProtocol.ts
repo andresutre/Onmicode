@@ -14,6 +14,7 @@ import {
 import { answerText } from "../../../../features/sessions/model/questionAnswers";
 import type { PiFlavor } from "./piFlavor";
 import { extractToolPreview, titleFromToolInput } from "../../core/preview";
+import { piSubagentLaunchTitle } from "./piSubagentName";
 import { upstreamProviderName } from "../../core/providerNames";
 import { streamTextDelta } from "../../core/streamText";
 
@@ -762,6 +763,12 @@ export function toolTitle(
   name: string,
   input: Record<string, unknown>,
 ): string {
+  // pi-subagents' `subagent` call carries a raw brief, a batch or a workflow;
+  // the shared agent title would name the row after the brief's first words.
+  if (name.trim().toLowerCase() === "subagent" && !input.action) {
+    const title = piSubagentLaunchTitle(input);
+    if (title) return title;
+  }
   return titleFromToolInput(name, toolKindFromName(name), input);
 }
 
