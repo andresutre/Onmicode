@@ -419,6 +419,7 @@ import {
   sameProviderAccountId,
   selectedProviderAccountId,
   accountProviderFor,
+  piCodexAccountId,
   type ProviderAccountProvider,
 } from "../features/providers/model/providerAccounts";
 import {
@@ -6911,6 +6912,7 @@ function Workspace({
           cwd: workCwd,
           message: titleMessage,
           providerAccountId,
+          codexAccountId: piCodexAccountId(current.harness, current.cwd),
         })
           .then(async (generated) => {
             if (
@@ -7187,6 +7189,7 @@ function Workspace({
                 model: current.model,
                 modelSettings: current.modelSettings,
                 providerAccountId,
+                codexAccountId: piCodexAccountId(current.harness, current.cwd),
                 runtimeMode: current.runtimeMode,
                 ephemeral: current.ephemeral === true,
                 controlsAgents: operatorAccess,
@@ -7238,6 +7241,7 @@ function Workspace({
               model: current.model,
               modelSettings: current.modelSettings,
               providerAccountId,
+              codexAccountId: piCodexAccountId(current.harness, current.cwd),
               runtimeMode: current.runtimeMode,
               ephemeral: current.ephemeral === true,
               intent,
@@ -8568,6 +8572,7 @@ function Workspace({
         harness,
         cwd,
         providerAccountId: input.source.providerAccountId,
+        codexAccountId: piCodexAccountId(harness, input.source.cwd),
         model: model || undefined,
         modelSettings: input.thread.modelSettings ?? input.source.modelSettings,
         ephemeral: false,
@@ -9105,6 +9110,7 @@ function Workspace({
                   current.cwd,
                 ))
               : undefined,
+            codexAccountId: piCodexAccountId(current.harness, current.cwd),
             runtimeMode: current.runtimeMode,
             ephemeral: current.ephemeral === true,
             controlsAgents: operatorEnabledInThread(current.blocks),

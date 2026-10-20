@@ -504,7 +504,7 @@ export function UsageChips({
     : {};
 
   const lead =
-    session?.harness === "pi" && !primary.includes("claude") ? (
+    session?.harness === "pi" && primary.length === 0 ? (
       <PiUsage
         key={`${session.id}:${session.model}`}
         model={session.model}

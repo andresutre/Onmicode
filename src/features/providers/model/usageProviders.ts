@@ -28,6 +28,9 @@ export function usageProvidersFor(
   model?: string,
 ): RateLimitProvider[] {
   if (harness === "pi" && piUsesClaudeCode(model)) return ["claude"];
+  // Onmicode signs Pi's built-in Codex models in with a Codex profile.
+  if (harness === "pi" && model?.startsWith("pi:openai-codex/"))
+    return ["codex"];
   return isRateLimitProvider(harness) ? [harness] : [];
 }
 

@@ -175,6 +175,8 @@ export type HarnessSessionInput = {
   model: string;
   modelSettings?: Record<string, string>;
   providerAccountId?: string;
+  /** Pi only: the Codex profile its `openai-codex` models sign in with. */
+  codexAccountId?: string;
   runtimeMode: RuntimeMode;
   /** Keep provider context in memory; MonoCode owns the saved transcript. */
   ephemeral?: boolean;
