@@ -1,9 +1,16 @@
-import type { Attachment, ToolPreview, TurnMetrics } from "../../../../features/sessions/model/session";
+import type {
+  Attachment,
+  ToolPreview,
+  TurnMetrics,
+} from "../../../../features/sessions/model/session";
 import {
   attachmentPathText,
   promptText,
 } from "../../../../features/sessions/model/attachments";
-import type { AgentModel, ModelSetting } from "../../../../features/sessions/model/models";
+import type {
+  AgentModel,
+  ModelSetting,
+} from "../../../../features/sessions/model/models";
 import { isTaskListToolName } from "../../../../features/sessions/model/taskList";
 import {
   questionsFromUnknown,
@@ -759,15 +766,31 @@ export function toolKindFromName(toolName: string): string {
   return toolName;
 }
 
+/** pi-subagents' management calls, which start no run of their own. */
+const SUBAGENT_ACTION_TITLES: Record<string, string> = {
+  status: "Check on subagents",
+  list: "List subagents",
+  steer: "Message a running subagent",
+  resume: "Resume a subagent",
+  stop: "Stop a subagent",
+  interrupt: "Stop a subagent",
+  guide: "Read the subagent guide",
+};
+
 export function toolTitle(
   name: string,
   input: Record<string, unknown>,
 ): string {
   // pi-subagents' `subagent` call carries a raw brief, a batch or a workflow;
   // the shared agent title would name the row after the brief's first words.
-  if (name.trim().toLowerCase() === "subagent" && !input.action) {
+  if (name.trim().toLowerCase() === "subagent") {
+    // A title starting with "Subagent" marks a row as a run, so a status
+    // check, or a launch whose arguments haven't arrived, must not get one.
+    if (typeof input.action === "string")
+      return SUBAGENT_ACTION_TITLES[input.action] ?? "Manage subagents";
     const title = piSubagentLaunchTitle(input);
     if (title) return title;
+    if (input.task == null && input.agent == null) return "Starting subagents";
   }
   return titleFromToolInput(name, toolKindFromName(name), input);
 }

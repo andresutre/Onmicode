@@ -5,6 +5,11 @@ import {
 } from "../../../../features/sessions/model/sessionTitle";
 import { OMP_FLAVOR, PI_FLAVOR, type PiFlavor } from "./piFlavor";
 import { runTextPrompt } from "./piText";
+import type { PiSubagentTitler } from "./piFamily";
+import {
+  buildSubagentTitlePrompt,
+  parseSubagentTitles,
+} from "./piSubagentTitles";
 
 const TITLE_TIMEOUT_MS = 45_000;
 
@@ -32,6 +37,24 @@ async function generateSessionTitle(
     return null;
   }
 }
+
+/** Titles for a launch's subagents, from the same cheap model as the thread's. */
+export const generatePiSubagentTitles: PiSubagentTitler = async ({
+  flavor,
+  cwd,
+  providerAccountId,
+  codexAccountId,
+  briefs,
+}) => {
+  const output = await runTextPrompt(flavor, {
+    cwd,
+    providerAccountId,
+    codexAccountId,
+    prompt: buildSubagentTitlePrompt(briefs),
+    timeoutMs: TITLE_TIMEOUT_MS,
+  });
+  return parseSubagentTitles(output, briefs.length);
+};
 
 export function generatePiSessionTitle(input: {
   sessionId: string;

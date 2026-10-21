@@ -41,7 +41,9 @@ import {
   piSubagentNotice,
   runRowStatus,
   type PiBackgroundSnapshot,
+  isPiSubagentBatch,
 } from "./piSubagents";
+import { piSubagentBriefs } from "./piSubagentTitles";
 import { piSubagentLaunchTitle } from "./piSubagentName";
 import {
   addPiTurnUsage,
@@ -171,12 +173,24 @@ type Live = {
    * reports the end before the notice that carries the run's report.
    */
   endedRunRows: Map<string, string>;
+  /**
+   * Model-written names for subagent rows, by row id, once they arrive.
+   * Every later update to the row carries the name, so progress can't put
+   * the brief's first words back.
+   */
+  subagentTitles: Map<string, string>;
+  /** Launches whose runs have been sent off to be named. */
+  titledLaunches: Set<string>;
+  /** Rows already in the transcript; a title for any other waits for it. */
+  shownRows: Set<string>;
 };
 
 type BackgroundRun = {
   label: string;
   /** Transcript row of the `subagent` call that launched it. */
   rowId?: string;
+  /** The row is the heading of several runs, not a run itself. */
+  batch?: boolean;
   /** Seen in a status snapshot, so a later snapshot without it means ended. */
   reported: boolean;
   /** Follows the run's files so its row shows what the subagent is doing. */
@@ -313,6 +327,104 @@ export const ompCommandProvider: NativeCommandProvider = {
 };
 
 /** Test seam. */
+/**
+ * Writes short titles for subagent briefs, one per brief in order, as a
+ * thread gets its title. Set by the adapter: piText imports this module.
+ */
+export type PiSubagentTitler = (input: {
+  flavor: PiFlavor;
+  cwd: string;
+  providerAccountId?: string;
+  codexAccountId?: string;
+  briefs: Array<string | undefined>;
+}) => Promise<Array<string | undefined>>;
+
+let subagentTitler: PiSubagentTitler | undefined;
+
+export function setPiSubagentTitler(fn: PiSubagentTitler | undefined): void {
+  subagentTitler = fn;
+}
+
+/** Passes Pi's events on, naming subagent rows that have a written title. */
+function titledEvents(
+  live: Live,
+  onEvent: (event: HarnessEvent) => void,
+): (event: HarnessEvent) => void {
+  return (event) => {
+    if (event.type === "tool.started" || event.type === "tool.updated")
+      live.shownRows.add(event.callId);
+    if (
+      (event.type === "tool.updated" || event.type === "agent.step") &&
+      live.subagentTitles.size > 0
+    ) {
+      const title = live.subagentTitles.get(event.callId);
+      if (title) {
+        onEvent(
+          event.type === "agent.step"
+            ? { ...event, agentName: title }
+            : event.kind === "agent" || event.kind == null
+              ? { ...event, title, agentName: title }
+              : event,
+        );
+        return;
+      }
+    }
+    onEvent(event);
+  };
+}
+
+/**
+ * Names a `subagent` call's runs with the model, the way the thread itself
+ * is named, once its briefs are known. The rows keep their brief-based names
+ * until the titles arrive, and keep them if naming fails.
+ */
+function nameSubagents(flavor: PiFlavor, live: Live, tool: InFlightTool): void {
+  if (!subagentTitler || live.titledLaunches.has(tool.id)) return;
+  const briefs = piSubagentBriefs(tool.input);
+  if (!briefs.some(Boolean)) return;
+  live.titledLaunches.add(tool.id);
+  const batch = isPiSubagentBatch(tool.input);
+  void subagentTitler({
+    flavor,
+    cwd: live.cwd,
+    providerAccountId: live.providerAccountId,
+    codexAccountId: live.codexAccountId,
+    briefs,
+  })
+    .then((titles) => {
+      titles.forEach((title, index) => {
+        if (!title) return;
+        const rowId = batch
+          ? subagentRowId(tool.id, tool.input, index)
+          : tool.id;
+        live.subagentTitles.set(rowId, title);
+        // A row not shown yet takes the name when it first reports; sending
+        // it now would add the row out of place.
+        if (live.muteUpdates || !live.shownRows.has(rowId)) return;
+        live.onEvent({
+          type: "tool.updated",
+          callId: rowId,
+          kind: "agent",
+          title,
+          agentName: title,
+        });
+      });
+    })
+    .catch((error: unknown) => {
+      console.debug("[onmicode] pi subagent titles", error);
+    });
+}
+
+/** The row id of a batch's `index`th run, as piSubagentEvents names it. */
+function subagentRowId(
+  launchId: string,
+  input: Record<string, unknown>,
+  index: number,
+): string {
+  const workflow = input.workflow != null && input.workflow !== false;
+  return `${launchId}:agent:${workflow ? `task-${index + 1}` : index}`;
+}
+
 export function setPiBinaryResolver(
   flavor: PiFlavor,
   fn: () => Promise<{ path: string }>,
@@ -339,7 +451,7 @@ export async function sendTurn(
   }
   if (cancelledThreads.delete(input.sessionId)) return;
 
-  live.onEvent = input.onEvent;
+  live.onEvent = titledEvents(live, input.onEvent);
   live.turns = live.turns
     .catch(() => undefined)
     .then(async () => {
@@ -364,12 +476,12 @@ export async function compactContext(
   if (!live || live.cwd !== input.cwd) {
     live = await ensureLive(flavor, input);
   } else {
-    live.onEvent = input.onEvent;
+    live.onEvent = titledEvents(live, input.onEvent);
     await applyModel(flavor, live, input);
   }
   if (state.cancelledThreads.delete(input.sessionId)) return;
 
-  live.onEvent = input.onEvent;
+  live.onEvent = titledEvents(live, input.onEvent);
   live.turns = live.turns
     .catch(() => undefined)
     .then(async () => {
@@ -401,7 +513,7 @@ export async function rewindLastTurn(
   if (!live || live.cwd !== input.cwd) {
     live = await ensureLive(flavor, input);
   } else {
-    live.onEvent = input.onEvent;
+    live.onEvent = titledEvents(live, input.onEvent);
     await applyModel(flavor, live, input);
   }
   if (live.activeTurn) {
@@ -572,7 +684,7 @@ async function ensureLive(
     ) &&
     sameProviderAccountId(existing.codexAccountId, input.codexAccountId)
   ) {
-    existing.onEvent = input.onEvent;
+    existing.onEvent = titledEvents(existing, input.onEvent);
     await applyModel(flavor, existing, input);
     return existing;
   }
@@ -662,7 +774,11 @@ async function startLive(
     awaitingWake: null,
     backgroundKey: "",
     endedRunRows: new Map(),
+    subagentTitles: new Map(),
+    titledLaunches: new Set(),
+    shownRows: new Set(),
   };
+  live.onEvent = titledEvents(live, input.onEvent);
   liveRef.current = live;
 
   watchChild(
@@ -827,7 +943,7 @@ async function stopBackgroundRuns(flavor: PiFlavor, live: Live): Promise<void> {
       live.onEvent({
         type: "tool.updated",
         callId: run.rowId,
-        kind: "agent",
+        kind: run.batch ? "other" : "agent",
         status: "failed",
         detail: "Stopped.",
       });
@@ -889,6 +1005,20 @@ function notePiRunStarted(live: Live): void {
   syncBackgroundWait(live);
 }
 
+/**
+ * A row's kind. A `subagent` call launching several runs is their group
+ * heading, so it stays "other" on every update; flipping it to "agent" and
+ * back makes the heading count as a run and drop out again, which flickers.
+ */
+function rowKind(name: string, input: Record<string, unknown>): string {
+  const kind = toolKindFromName(name);
+  if (kind !== "agent" || name.trim().toLowerCase() !== "subagent") return kind;
+  // Until its arguments stream in, a call can't be told from a batch; it
+  // counts as a run only once it names one. Management calls never do.
+  if (input.action != null || isPiSubagentBatch(input)) return "other";
+  return input.task != null || input.agent != null ? "agent" : "other";
+}
+
 function backgroundRowStatus(
   live: Live,
   run: BackgroundRun,
@@ -899,7 +1029,7 @@ function backgroundRowStatus(
   live.onEvent({
     type: "tool.updated",
     callId: run.rowId,
-    kind: "agent",
+    kind: run.batch ? "other" : "agent",
     status,
     ...extra,
   });
@@ -960,6 +1090,7 @@ function noteBackgroundLaunch(
   const run: BackgroundRun = {
     label,
     rowId: tool.id,
+    batch: isPiSubagentBatch(tool.input),
     reported: known?.reported ?? false,
     ...(known?.progress ? { progress: known.progress } : {}),
   };
@@ -1391,10 +1522,12 @@ function handleFrame(
         type: "tool.updated",
         callId: tool.id,
         title: tool.title,
-        kind: toolKindFromName(tool.name),
+        kind: rowKind(tool.name, tool.input),
         status: "running",
         preview: previewFromTool(tool.name, tool.input),
       });
+      if (tool.name.trim().toLowerCase() === "subagent")
+        nameSubagents(flavor, live, tool);
     }
   }
 
@@ -1412,7 +1545,7 @@ function handleFrame(
         type: "tool.updated",
         callId: tool.id,
         title: tool.title,
-        kind: toolKindFromName(tool.name),
+        kind: rowKind(tool.name, tool.input),
         status: "running",
         detail: execUpdate.detail,
         preview: previewFromTool(tool.name, tool.input, execUpdate.detail),
@@ -1438,7 +1571,7 @@ function handleFrame(
         type: "tool.updated",
         callId: tool.id,
         title: tool.title,
-        kind: toolKindFromName(tool.name),
+        kind: rowKind(tool.name, tool.input),
         status: execEnd.isError ? "failed" : "completed",
         detail: execEnd.detail,
         preview: previewFromTool(tool.name, tool.input, execEnd.detail),
@@ -1778,7 +1911,7 @@ function upsertTool(
       type: "tool.started",
       callId: id,
       title: tool.title,
-      kind: toolKindFromName(name),
+      kind: rowKind(name, input),
       status: "pending",
       preview: previewFromTool(name, input),
     });
@@ -1800,7 +1933,7 @@ function updateTool(
     type: "tool.updated",
     callId: tool.id,
     title: tool.title,
-    kind: toolKindFromName(tool.name),
+    kind: rowKind(tool.name, tool.input),
     status: "pending",
     detail: summarizeToolRequest(tool.name, tool.input),
     preview: previewFromTool(tool.name, tool.input),

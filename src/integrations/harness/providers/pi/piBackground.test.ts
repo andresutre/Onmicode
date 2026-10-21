@@ -30,7 +30,7 @@ vi.mock("../../core/child", () => ({
 }));
 
 import { cancelPiTurn, forgetPiSession, sendPiTurn, steerPiTurn } from "./pi";
-import { respondQuestion } from "./piFamily";
+import { respondQuestion, setPiSubagentTitler } from "./piFamily";
 import { PI_FLAVOR } from "./piFlavor";
 import { applyHarnessEvent } from "../../core/apply";
 import { newSession } from "../../../../features/sessions/model/session";
@@ -371,6 +371,210 @@ describe("Pi background subagents", () => {
       "Test run 3: reply OK",
     ]);
     await cancelPiTurn("pi-bg");
+    await running.turn;
+  });
+
+  it("keeps a foreground workflow's heading out of the count from the start", async () => {
+    // The order Pi 1.3.0 streamed a `workflow: "parallel"`, async:false call.
+    const tasks = [1, 2].map((n) => ({
+      agent: "scout",
+      task: `Reply with exactly PONG${n}.`,
+    }));
+    const args = { workflow: "parallel", args: { tasks }, async: false };
+    const children = (states: string[]) => ({
+      details: {
+        mode: "workflow",
+        results: [],
+        workflowChildren: {
+          version: 1,
+          children: states.map((state, index) => ({
+            childId: `task-${index + 1}`,
+            state,
+            agent: "scout",
+          })),
+        },
+      },
+    });
+    const running = await start();
+    const counts: number[] = [];
+    const step = (value: Record<string, unknown>) => {
+      frame(value);
+      counts.push(
+        currentTurnSubagents(
+          events.reduce(applyHarnessEvent, newSession("pi", "/repo")).blocks,
+        ).length,
+      );
+    };
+    step({ type: "agent_start" });
+    step({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "toolcall_start",
+        contentIndex: 0,
+        id: "call-1",
+        toolName: "subagent",
+      },
+    });
+    step({
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "subagent",
+      args,
+    });
+    for (const states of [
+      ["running"],
+      ["running", "running"],
+      ["completed", "running"],
+    ])
+      step({
+        type: "tool_execution_update",
+        toolCallId: "call-1",
+        toolName: "subagent",
+        args,
+        partialResult: children(states),
+      });
+    step({
+      type: "tool_execution_end",
+      toolCallId: "call-1",
+      toolName: "subagent",
+      isError: false,
+      result: {
+        content: [{ type: "text", text: "PONG1\nPONG2" }],
+        details: {
+          mode: "workflow",
+          results: tasks.map((task, index) => ({
+            ...task,
+            index: 0,
+            workflowKey: `task-${index + 1}`,
+            exitCode: 0,
+            finalOutput: `PONG${index + 1}`,
+          })),
+        },
+      },
+    });
+    // Never more runs than were launched, and never the heading as one.
+    expect(Math.max(...counts)).toBe(2);
+    expect(counts.at(-1)).toBe(2);
+    const kinds = events
+      .filter((event) => "callId" in event && event.callId === "call-1")
+      .map((event) => ("kind" in event ? event.kind : undefined))
+      .filter(Boolean);
+    expect(new Set(kinds)).toEqual(new Set(["other"]));
+    frame({ type: "agent_end" });
+    frame({ type: "agent_settled" });
+    await running.turn;
+  });
+
+  it("names each parallel subagent with the model, like the thread", async () => {
+    const tasks = [487, 486].map((n) => ({
+      agent: "reviewer",
+      task: `Repo C:/Users/Tuta/flowxtrade. Review GitHub PR #${n} (use gh pr diff ${n}; do NOT merge).`,
+    }));
+    const args = { workflow: "parallel", args: { tasks }, async: false };
+    const asked: Array<Array<string | undefined>> = [];
+    let answer: (titles: string[]) => void = () => undefined;
+    setPiSubagentTitler(({ briefs }) => {
+      asked.push(briefs);
+      return new Promise((resolve) => {
+        answer = resolve;
+      });
+    });
+    try {
+      const running = await start();
+      const names = () =>
+        currentTurnSubagents(
+          events.reduce(applyHarnessEvent, newSession("pi", "/repo")).blocks,
+        ).map((run) => run.name);
+      const update = (states: string[]) =>
+        frame({
+          type: "tool_execution_update",
+          toolCallId: "call-1",
+          toolName: "subagent",
+          args,
+          partialResult: {
+            details: {
+              mode: "workflow",
+              results: [],
+              workflowChildren: {
+                version: 1,
+                children: states.map((state, index) => ({
+                  childId: `task-${index + 1}`,
+                  state,
+                })),
+              },
+            },
+          },
+        });
+      frame({ type: "agent_start" });
+      frame({
+        type: "tool_execution_start",
+        toolCallId: "call-1",
+        toolName: "subagent",
+        args,
+      });
+      expect(asked).toEqual([tasks.map((task) => task.task)]);
+      update(["running"]);
+      // A title for a row that hasn't reported yet waits for it.
+      answer(["Review PR #487", "Review PR #486"]);
+      await vi.waitFor(() => expect(names()).toEqual(["Review PR #487"]));
+      update(["running", "running"]);
+      expect(names()).toEqual(["Review PR #487", "Review PR #486"]);
+      // Later progress doesn't put the brief's words back.
+      update(["completed", "running"]);
+      expect(names()).toEqual(["Review PR #487", "Review PR #486"]);
+      frame({ type: "agent_end" });
+      frame({ type: "agent_settled" });
+      await running.turn;
+    } finally {
+      setPiSubagentTitler(undefined);
+    }
+  });
+
+  it("keeps the brief's name when naming fails", async () => {
+    setPiSubagentTitler(async () => {
+      throw new Error("no model");
+    });
+    try {
+      const running = await start();
+      frame({ type: "agent_start" });
+      frame({
+        type: "tool_execution_start",
+        toolCallId: "call-1",
+        toolName: "subagent",
+        args: { agent: "scout", task: "Find where the legend overlaps." },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(
+        currentTurnSubagents(
+          events.reduce(applyHarnessEvent, newSession("pi", "/repo")).blocks,
+        ).map((run) => run.name),
+      ).toEqual(["Find where the legend overlaps"]);
+      frame({ type: "agent_end" });
+      frame({ type: "agent_settled" });
+      await running.turn;
+    } finally {
+      setPiSubagentTitler(undefined);
+    }
+  });
+
+  it("doesn't count a status check as a subagent", async () => {
+    const running = await start();
+    frame({ type: "agent_start" });
+    frame({
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "subagent",
+      args: { action: "status", id: RUN },
+    });
+    const session = events.reduce(applyHarnessEvent, newSession("pi", "/repo"));
+    expect(currentTurnSubagents(session.blocks)).toEqual([]);
+    expect(
+      session.blocks.find((block) => block.tool?.callId === "call-1")?.tool
+        ?.title,
+    ).toBe("Check on subagents");
+    frame({ type: "agent_end" });
+    frame({ type: "agent_settled" });
     await running.turn;
   });
 
