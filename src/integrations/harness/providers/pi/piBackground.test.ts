@@ -374,6 +374,117 @@ describe("Pi background subagents", () => {
     await running.turn;
   });
 
+  it("keeps a foreground workflow's heading out of the count from the start", async () => {
+    // The order Pi 1.3.0 streamed a `workflow: "parallel"`, async:false call.
+    const tasks = [1, 2].map((n) => ({
+      agent: "scout",
+      task: `Reply with exactly PONG${n}.`,
+    }));
+    const args = { workflow: "parallel", args: { tasks }, async: false };
+    const children = (states: string[]) => ({
+      details: {
+        mode: "workflow",
+        results: [],
+        workflowChildren: {
+          version: 1,
+          children: states.map((state, index) => ({
+            childId: `task-${index + 1}`,
+            state,
+            agent: "scout",
+          })),
+        },
+      },
+    });
+    const running = await start();
+    const counts: number[] = [];
+    const step = (value: Record<string, unknown>) => {
+      frame(value);
+      counts.push(
+        currentTurnSubagents(
+          events.reduce(applyHarnessEvent, newSession("pi", "/repo")).blocks,
+        ).length,
+      );
+    };
+    step({ type: "agent_start" });
+    step({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "toolcall_start",
+        contentIndex: 0,
+        id: "call-1",
+        toolName: "subagent",
+      },
+    });
+    step({
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "subagent",
+      args,
+    });
+    for (const states of [
+      ["running"],
+      ["running", "running"],
+      ["completed", "running"],
+    ])
+      step({
+        type: "tool_execution_update",
+        toolCallId: "call-1",
+        toolName: "subagent",
+        args,
+        partialResult: children(states),
+      });
+    step({
+      type: "tool_execution_end",
+      toolCallId: "call-1",
+      toolName: "subagent",
+      isError: false,
+      result: {
+        content: [{ type: "text", text: "PONG1\nPONG2" }],
+        details: {
+          mode: "workflow",
+          results: tasks.map((task, index) => ({
+            ...task,
+            index: 0,
+            workflowKey: `task-${index + 1}`,
+            exitCode: 0,
+            finalOutput: `PONG${index + 1}`,
+          })),
+        },
+      },
+    });
+    // Never more runs than were launched, and never the heading as one.
+    expect(Math.max(...counts)).toBe(2);
+    expect(counts.at(-1)).toBe(2);
+    const kinds = events
+      .filter((event) => "callId" in event && event.callId === "call-1")
+      .map((event) => ("kind" in event ? event.kind : undefined))
+      .filter(Boolean);
+    expect(new Set(kinds)).toEqual(new Set(["other"]));
+    frame({ type: "agent_end" });
+    frame({ type: "agent_settled" });
+    await running.turn;
+  });
+
+  it("doesn't count a status check as a subagent", async () => {
+    const running = await start();
+    frame({ type: "agent_start" });
+    frame({
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "subagent",
+      args: { action: "status", id: RUN },
+    });
+    const session = events.reduce(applyHarnessEvent, newSession("pi", "/repo"));
+    expect(currentTurnSubagents(session.blocks)).toEqual([]);
+    expect(
+      session.blocks.find((block) => block.tool?.callId === "call-1")?.tool
+        ?.title,
+    ).toBe("Check on subagents");
+    frame({ type: "agent_end" });
+    frame({ type: "agent_settled" });
+    await running.turn;
+  });
+
   it("lets the turn go when a finished run never wakes Pi", async () => {
     const running = await start();
     detachAndYield();

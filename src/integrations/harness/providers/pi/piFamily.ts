@@ -41,6 +41,7 @@ import {
   piSubagentNotice,
   runRowStatus,
   type PiBackgroundSnapshot,
+  isPiSubagentBatch,
 } from "./piSubagents";
 import { piSubagentLaunchTitle } from "./piSubagentName";
 import {
@@ -177,6 +178,8 @@ type BackgroundRun = {
   label: string;
   /** Transcript row of the `subagent` call that launched it. */
   rowId?: string;
+  /** The row is the heading of several runs, not a run itself. */
+  batch?: boolean;
   /** Seen in a status snapshot, so a later snapshot without it means ended. */
   reported: boolean;
   /** Follows the run's files so its row shows what the subagent is doing. */
@@ -827,7 +830,7 @@ async function stopBackgroundRuns(flavor: PiFlavor, live: Live): Promise<void> {
       live.onEvent({
         type: "tool.updated",
         callId: run.rowId,
-        kind: "agent",
+        kind: run.batch ? "other" : "agent",
         status: "failed",
         detail: "Stopped.",
       });
@@ -889,6 +892,20 @@ function notePiRunStarted(live: Live): void {
   syncBackgroundWait(live);
 }
 
+/**
+ * A row's kind. A `subagent` call launching several runs is their group
+ * heading, so it stays "other" on every update; flipping it to "agent" and
+ * back makes the heading count as a run and drop out again, which flickers.
+ */
+function rowKind(name: string, input: Record<string, unknown>): string {
+  const kind = toolKindFromName(name);
+  if (kind !== "agent" || name.trim().toLowerCase() !== "subagent") return kind;
+  // Until its arguments stream in, a call can't be told from a batch; it
+  // counts as a run only once it names one. Management calls never do.
+  if (input.action != null || isPiSubagentBatch(input)) return "other";
+  return input.task != null || input.agent != null ? "agent" : "other";
+}
+
 function backgroundRowStatus(
   live: Live,
   run: BackgroundRun,
@@ -899,7 +916,7 @@ function backgroundRowStatus(
   live.onEvent({
     type: "tool.updated",
     callId: run.rowId,
-    kind: "agent",
+    kind: run.batch ? "other" : "agent",
     status,
     ...extra,
   });
@@ -960,6 +977,7 @@ function noteBackgroundLaunch(
   const run: BackgroundRun = {
     label,
     rowId: tool.id,
+    batch: isPiSubagentBatch(tool.input),
     reported: known?.reported ?? false,
     ...(known?.progress ? { progress: known.progress } : {}),
   };
@@ -1391,7 +1409,7 @@ function handleFrame(
         type: "tool.updated",
         callId: tool.id,
         title: tool.title,
-        kind: toolKindFromName(tool.name),
+        kind: rowKind(tool.name, tool.input),
         status: "running",
         preview: previewFromTool(tool.name, tool.input),
       });
@@ -1412,7 +1430,7 @@ function handleFrame(
         type: "tool.updated",
         callId: tool.id,
         title: tool.title,
-        kind: toolKindFromName(tool.name),
+        kind: rowKind(tool.name, tool.input),
         status: "running",
         detail: execUpdate.detail,
         preview: previewFromTool(tool.name, tool.input, execUpdate.detail),
@@ -1438,7 +1456,7 @@ function handleFrame(
         type: "tool.updated",
         callId: tool.id,
         title: tool.title,
-        kind: toolKindFromName(tool.name),
+        kind: rowKind(tool.name, tool.input),
         status: execEnd.isError ? "failed" : "completed",
         detail: execEnd.detail,
         preview: previewFromTool(tool.name, tool.input, execEnd.detail),
@@ -1778,7 +1796,7 @@ function upsertTool(
       type: "tool.started",
       callId: id,
       title: tool.title,
-      kind: toolKindFromName(name),
+      kind: rowKind(name, input),
       status: "pending",
       preview: previewFromTool(name, input),
     });
@@ -1800,7 +1818,7 @@ function updateTool(
     type: "tool.updated",
     callId: tool.id,
     title: tool.title,
-    kind: toolKindFromName(tool.name),
+    kind: rowKind(tool.name, tool.input),
     status: "pending",
     detail: summarizeToolRequest(tool.name, tool.input),
     preview: previewFromTool(tool.name, tool.input),

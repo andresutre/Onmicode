@@ -10,6 +10,20 @@ import {
 } from "./piProtocol";
 import { piSubagentName } from "./piSubagentName";
 
+/**
+ * A `subagent` call that launches several runs. Its own row is the group's
+ * heading, not a run, and must keep that kind on every update: a row whose
+ * kind flips moves in and out of the ticker and the transcript each time.
+ */
+export function isPiSubagentBatch(input: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(input.tasks) ||
+    Array.isArray(asRecord(input.args)?.tasks) ||
+    Array.isArray(input.chain) ||
+    (input.workflow != null && input.workflow !== false)
+  );
+}
+
 /** Pi extension results and omp TaskToolDetails are cumulative snapshots. */
 export function piSubagentEvents(
   callId: string,
@@ -31,18 +45,13 @@ export function piSubagentEvents(
       ? results
       : workflowChildEntries(details, inputTasks);
   if (!entries.length) return [];
-  const batch =
-    entries.length > 1 ||
-    inputTasks.length > 0 ||
-    Array.isArray(input.chain) ||
-    (input.workflow != null && input.workflow !== false);
+  const batch = entries.length > 1 || isPiSubagentBatch(input);
   const events: HarnessEvent[] = [];
   if (batch) {
     events.push({
       type: "tool.updated",
       callId,
       kind: "other",
-      title: "Delegate subagents",
     });
   }
   entries.forEach((entry, index) => {
