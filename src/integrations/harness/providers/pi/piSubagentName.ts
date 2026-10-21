@@ -48,6 +48,8 @@ const SETUP = [
   // "You are in a git worktree at …, on branch …"
   /^you(?:'re| are) (?:in|inside|on|working in)\b/i,
   /^(?:repo(?:sitory)? root|cwd|working directory|worktree|branch)\b[^:]*:/i,
+  // "Repo C:/Users/me/project." names where, not what.
+  /^(?:in )?(?:the )?repo(?:sitory)?(?: at| in|:)?\s+\S+\.?$/i,
   /^use (?:the )?worktree\b/i,
   /^(?:never|do not|don't|avoid)\b/i,
   /^final (?:message|answer|reply|output)\b/i,

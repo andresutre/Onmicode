@@ -97,6 +97,7 @@ export function applyHarnessEvent(
         paths: event.paths,
         streaming: event.status !== "completed" && event.status !== "failed",
         agentModel: event.agentModel,
+        agentName: event.agentName,
       });
     case "agent.step":
       return recordAgentStep(session, event);
@@ -964,6 +965,7 @@ function upsertTool(
     paths?: string[];
     streaming: boolean;
     agentModel?: string;
+    agentName?: string;
     background?: boolean;
   },
 ): Session {
@@ -1019,7 +1021,9 @@ function upsertTool(
   const kind = patch.kind ?? prev.tool?.kind;
   const status = patch.status ?? prev.tool?.status;
   const paths = patch.paths ?? prev.tool?.paths;
-  const agentName = prev.agentRun?.steps.length ? prev.agentRun.name : label;
+  const agentName =
+    patch.agentName ??
+    (prev.agentRun?.steps.length ? prev.agentRun.name : label);
   if (
     prev.text === label &&
     prev.streaming === patch.streaming &&
@@ -1030,6 +1034,7 @@ function upsertTool(
     prev.tool?.paths === paths &&
     (!patch.agentModel || prev.agentRun?.model === patch.agentModel) &&
     (!prev.agentRun || prev.agentRun.name === agentName) &&
+    (!patch.agentName || prev.agentRun?.name === patch.agentName) &&
     samePreview(prev.tool?.preview, preview)
   ) {
     return session;
@@ -1039,7 +1044,7 @@ function upsertTool(
     ...prev,
     text: label,
     streaming: patch.streaming,
-    ...(patch.agentModel || prev.agentRun
+    ...(patch.agentModel || patch.agentName || prev.agentRun
       ? {
           agentRun: {
             steps: prev.agentRun?.steps ?? [],

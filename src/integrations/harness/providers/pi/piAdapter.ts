@@ -10,11 +10,11 @@ import {
   stopPiSession,
 } from "./pi";
 import { refreshPiCatalog } from "./piCatalog";
-import { generatePiSessionTitle } from "./piTitle";
+import { generatePiSessionTitle, generatePiSubagentTitles } from "./piTitle";
 import { runPiTextPrompt, stopPiTextPrompt, warmupPiText } from "./piText";
 import { registerHarness, type HarnessAdapter } from "../../core/registry";
 import { discoverPiSkills } from "./piSkills";
-import { respondQuestion } from "./piFamily";
+import { respondQuestion, setPiSubagentTitler } from "./piFamily";
 import { PI_FLAVOR } from "./piFlavor";
 
 export const piAdapter: HarnessAdapter = {
@@ -43,6 +43,7 @@ let registered = false;
 
 export function ensurePiRegistered(): void {
   if (registered) return;
+  setPiSubagentTitler(generatePiSubagentTitles);
   registerHarness(piAdapter);
   registered = true;
 }

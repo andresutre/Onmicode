@@ -70,6 +70,11 @@ export type HarnessEvent =
   | {
       type: "tool.updated";
       agentModel?: string;
+      /**
+       * Renames the subagent this row runs, even after it has taken steps;
+       * otherwise a run keeps the name it started with.
+       */
+      agentName?: string;
       callId: string;
       title?: string;
       kind?: string;

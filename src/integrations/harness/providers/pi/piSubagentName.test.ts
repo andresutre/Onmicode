@@ -19,6 +19,14 @@ describe("piSubagentName", () => {
     expect(taskHeadline(WORKTREE)).toBe("The PR now conflicts with dev");
   });
 
+  it("skips a brief's opening repo path", () => {
+    expect(
+      piSubagentName({
+        task: "Repo C:/Users/Tuta/Documents/AggregateTrades/flowxtrade. PR #484 (branch fix/liq-imbalance-colours, base dev) now has merge conflicts with dev.",
+      }),
+    ).toBe("PR #484 now has merge conflicts with dev");
+  });
+
   it("keeps a short brief whole, minus formatting", () => {
     expect(
       taskHeadline("Reply with the single word PONG. Do not use tools."),
